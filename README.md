@@ -9,6 +9,8 @@ A UML2 StateMachine implemenation in Rust programming language.
 ## Building the associated Book 
 
 Along with documentation as part of the source code, there is a markdown book in this repo.
+This book is generated using the handy mdbook crate, and published on github.io.
+
 
 - Build/View the book locally: ```mdbook build --open```
 - Rebuild/View loop: ```mdbook watch --open```
