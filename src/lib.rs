@@ -4,6 +4,64 @@ use std::process;
 // use std::io::{self, Write};
 //use std::string::ToString;
 
+/// StateMachineError enumerates all possible errors returned by this library.
+#[derive(Debug)]
+pub enum StateMachineError {
+    /// Represents an empty source. For example, an empty text file being given
+    /// as input to `count_words()`.
+    VertexAlreadyAdded(Name),
+    VertexAlreadyInDifferentRegion(Name),
+    ElementNotFound(DbId),
+    InvalidState(DbId),
+    InvalidVertex(DbId),
+    InvalidRegion(DbId),
+    InvalidDbId(DbId),
+    NoCommonAncestor(DbId, DbId),
+    StateAlreadyExists(Name),
+    RegionAlreadyExists(Name),
+    ContainsNoRegions(DbId),
+    ContainsMultipleRegions(DbId),
+    CannotAddState(DbId),
+
+    /// Represents a failure to read from input.
+    ReadError {
+        source: std::io::Error,
+    },
+
+    /// Represents all other cases of `std::io::Error`.
+    IOError(std::io::Error),
+}
+
+impl std::error::Error for StateMachineError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match *self {
+            StateMachineError::StateAlreadyExists(_) => None,
+            StateMachineError::ReadError { ref source } => Some(source),
+            StateMachineError::IOError(_) => None,
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for StateMachineError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match *self {
+            StateMachineError::StateAlreadyExists(name) => {
+                write!(f, "State {} already defined", name)
+            }
+            StateMachineError::ReadError { .. } => write!(f, "Read error"),
+            StateMachineError::IOError(ref err) => err.fmt(f),
+            _ => write!(f, "Unhandled error"),
+        }
+    }
+}
+
+impl From<std::io::Error> for StateMachineError {
+    fn from(err: std::io::Error) -> StateMachineError {
+        StateMachineError::IOError(err)
+    }
+}
+
 /*
 Simple State: a state without internal Vertices or Transitions.
 Composite State: a state with at least one Region.
@@ -162,14 +220,12 @@ impl Db {
         Ok(&self.fullnames[dbid])
     }
 
-    pub fn region(&self, dbid: DbId) -> Option<DbId> {
-        if dbid >= self.elements.len() {
-            return None;
-        }
+    pub fn region(&self, dbid: DbId) -> StateMachineResult<DbId> {
+        self.is_valid_dbid(dbid)?;
         match self.elements[dbid].element_type {
-            ElementType::Vertex(_) => self.vertices[self.elements[dbid].idx].container,
-            ElementType::Region => None,
-            ElementType::StateMachine => None,
+            ElementType::Vertex(_) => Ok(self.vertices[self.elements[dbid].idx].container),
+            ElementType::Region => Ok(dbid),
+            ElementType::StateMachine => Err(StateMachineError::InvalidVertex(dbid)),
         }
     }
 
@@ -233,13 +289,8 @@ impl Db {
         let s_idx = self.states.len();
         let dbid = self.new_element(name, r_dbid, v_idx, ElementType::Vertex(VertexType::State));
         self.states.push(State::new(dbid));
-        self.vertices.push(VertexDef::new(
-            name,
-            dbid,
-            s_idx,
-            Some(r_dbid),
-            VertexType::State,
-        ));
+        self.vertices
+            .push(VertexDef::new(name, dbid, s_idx, r_dbid, VertexType::State));
         self.regions[r_idx].subvertex.push(dbid);
         println!("Vertices:{:#?}", self.vertices);
         Ok(dbid)
@@ -252,8 +303,16 @@ impl Db {
         // and then we call add_sm_region then presumably
         // we want to use that region name instead.
         if dbid == 2 && self.regions[0].name == "region_1" {
-            println!("Updating default region");
+            println!(
+                "Updating default region from {}",
+                self.regions[self.elements[self.state_machine.regions[0]].idx].name
+            );
             self.rename(1, name);
+            self.regions[self.elements[self.state_machine.regions[0]].idx].name = name;
+            println!(
+                "Updating default region to {}/{}",
+                self.regions[self.elements[self.state_machine.regions[0]].idx].name, name
+            );
             return Ok(1);
         }
         self.add_region(name, self.state_machine.dbid)
@@ -268,8 +327,77 @@ impl Db {
         */
     }
 
+    /// Return the least common ancestor Region of s1 and s2
+    /// If s1 is contained in s2 return the region of s1 and vice versa
+    /// Otherwise
+    pub fn lca(&self, s1: DbId, s2: DbId) -> StateMachineResult<RegionDbId> {
+        // TODO: check if both are vertices
+        self.is_valid_dbid(s1)?;
+        if self.ancestor(s1, s2) {
+            match self.elements[s2].element_type {
+                ElementType::Vertex(_) => Ok(self.parents[s2]),
+                ElementType::StateMachine => Err(StateMachineError::NoCommonAncestor(s1, s2)),
+                ElementType::Region => Ok(s2),
+            }
+        } else if self.ancestor(s2, s1) {
+            match self.elements[s1].element_type {
+                ElementType::Vertex(_) => Ok(self.parents[s1]),
+                ElementType::StateMachine => Err(StateMachineError::NoCommonAncestor(s1, s2)),
+                ElementType::Region => Ok(s1),
+            }
+        } else {
+            self.lca(self.parents[s1], self.parents[s2])
+        }
+    }
+
+    /*
+    fn parent_container_dbid(&self, child: DbId) -> StateMachineResult<DbId> {
+        let idx = self.elements[child];
+        match self.elements[child].element_type {
+            ElementType::Vertex(_) => self.vertices[idx].container,
+            ElementType::StateMachine => self.state_machine.regions[0],
+            ElementType::Region => self.parents[child],
+        }
+    }
+    */
+
+    pub fn ancestor_of(&self, parent: DbId, child: DbId) -> bool {
+        self.ancestor(child, parent)
+    }
+
+    pub fn has_ancestor(&self, child: DbId, parent: DbId) -> bool {
+        self.ancestor(child, parent)
+    }
+
+    pub fn ancestor(&self, child: DbId, parent: DbId) -> bool {
+        // TODO: check if both are vertices
+        if child == parent {
+            true
+        } else {
+            self.is_contained_in(child, parent)
+        }
+    }
+
     pub fn sm_regions(&self) -> Vec<RegionDbId> {
-        self.regions.iter().map(|r| r.dbid).collect()
+        self.state_machine.regions.clone()
+    }
+
+    pub fn regions(&self, dbid: DbId) -> StateMachineResult<Vec<RegionDbId>> {
+        let ele = self.get_element(dbid)?;
+        match ele.element_type {
+            ElementType::Vertex(VertexType::State) => Ok(self.states[ele.idx].regions.clone()),
+            ElementType::StateMachine => Ok(self.state_machine.regions.clone()),
+            _ => Err(StateMachineError::InvalidState(dbid)),
+        }
+    }
+
+    pub fn get_only_region(&self, dbid: DbId) -> StateMachineResult<RegionDbId> {
+        let regions = self.regions(dbid)?;
+        match regions.len() {
+            0 => Err(StateMachineError::ContainsNoRegions(dbid)),
+            1 => Ok(regions[0]),
+            _ => Err(StateMachineError::ContainsMultipleRegions(dbid)),
+        }
     }
 
     pub fn report(&self, report: ReportType) {
@@ -297,6 +425,7 @@ impl Db {
         self.regions.push(Region::new(name, dbid, c));
         let dbid = self.new_element(name, parent, idx, ElementType::Region);
         self.add_region_to_container(c, dbid);
+        println!("Added region {}:{}", name, dbid);
         Ok(dbid)
     }
 
@@ -411,6 +540,20 @@ impl Db {
         if child == parent {
             return false; // must be child, not same element
         }
+        self._is_contained_in(child, parent)
+    }
+
+    fn _is_contained_in(&self, child: DbId, parent: DbId) -> bool {
+        if child == 0 {
+            println!("Not contained in {} {}", child, parent);
+            false
+        } else if self.parents[child] == parent {
+            true
+        } else {
+            println!("no contained in {} {}", child, parent);
+            self._is_contained_in(self.parents[child], parent)
+        }
+        /*
         let c_ele = self.elements[child];
         println!("Child Ele is {:#?}", c_ele);
         match c_ele.element_type {
@@ -420,15 +563,10 @@ impl Db {
                     return true;
                 }
                 println!("Child State is {:#?}", c_ver);
-                match c_ver.container {
-                    Some(dbid) => {
-                        if dbid == parent {
-                            true
-                        } else {
-                            self.is_contained_in(dbid, parent)
-                        }
-                    }
-                    None => false,
+                if c_ver.container == parent {
+                    true
+                } else {
+                    self._is_contained_in(dbid, parent)
                 }
             }
             ElementType::Region => {
@@ -442,7 +580,7 @@ impl Db {
                             if dbid == parent {
                                 true
                             } else {
-                                self.is_contained_in(dbid, parent)
+                                self._is_contained_in(dbid, parent)
                             }
                         }
                         Container::StateMachine(dbid) => dbid == parent,
@@ -451,64 +589,7 @@ impl Db {
             }
             _ => false,
         }
-    }
-}
-
-/// StateMachineError enumerates all possible errors returned by this library.
-#[derive(Debug)]
-pub enum StateMachineError {
-    /// Represents an empty source. For example, an empty text file being given
-    /// as input to `count_words()`.
-    VertexAlreadyAdded(Name),
-    VertexAlreadyInDifferentRegion(Name),
-    ElementNotFound(DbId),
-    InvalidState(DbId),
-    InvalidVertex(DbId),
-    InvalidRegion(DbId),
-    InvalidDbId(DbId),
-    StateAlreadyExists(Name),
-    RegionAlreadyExists(Name),
-    NoRegionsInStateMachine(Name),
-    NoRegionsInState(Name),
-    MultipleRegionsInStateMachine(DbId),
-    CannotAddState(DbId),
-
-    /// Represents a failure to read from input.
-    ReadError {
-        source: std::io::Error,
-    },
-
-    /// Represents all other cases of `std::io::Error`.
-    IOError(std::io::Error),
-}
-
-impl std::error::Error for StateMachineError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match *self {
-            StateMachineError::StateAlreadyExists(_) => None,
-            StateMachineError::ReadError { ref source } => Some(source),
-            StateMachineError::IOError(_) => None,
-            _ => None,
-        }
-    }
-}
-
-impl std::fmt::Display for StateMachineError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match *self {
-            StateMachineError::StateAlreadyExists(name) => {
-                write!(f, "State {} already defined", name)
-            }
-            StateMachineError::ReadError { .. } => write!(f, "Read error"),
-            StateMachineError::IOError(ref err) => err.fmt(f),
-            _ => write!(f, "Unhandled error"),
-        }
-    }
-}
-
-impl From<std::io::Error> for StateMachineError {
-    fn from(err: std::io::Error) -> StateMachineError {
-        StateMachineError::IOError(err)
+        */
     }
 }
 
@@ -527,7 +608,7 @@ struct VertexDef {
     dbid: usize, // index into arena db elements
     idx: usize,  // index into arena db vec of corresponding element type
     vertex_type: VertexType,
-    container: Option<RegionIdx>,
+    container: RegionIdx, // Deviation: a vertex must be in a region.
     incoming: Vec<TransitionId>,
     outgoing: Vec<TransitionId>,
 }
@@ -536,7 +617,7 @@ impl VertexDef {
         name: Name,
         dbid: DbId,
         idx: usize,
-        region: Option<RegionIdx>,
+        region: RegionIdx, // Deviation: a vertex must be in a region.
         vertex_type: VertexType,
     ) -> VertexDef {
         VertexDef {
@@ -557,7 +638,7 @@ trait Vertex: std::fmt::Debug {
     fn name(&self, db: &Db) -> StateMachineResult<Name> {
         Ok(db.vertices[self.def(db)?].name)
     }
-    fn container(&self, db: &Db) -> StateMachineResult<Option<RegionIdx>> {
+    fn container(&self, db: &Db) -> StateMachineResult<RegionIdx> {
         Ok(db.vertices[self.def(db)?].container)
     }
     fn incoming<'db>(&self, db: &'db Db) -> StateMachineResult<&'db Vec<TransitionId>> {
@@ -646,11 +727,13 @@ impl StateMachineDef {
         self.regions.push(region_dbid);
     }
 
+    /// For a StateMachine return a Region if there is only one region
+    /// within that statemachine.
     fn get_only_region(&self) -> StateMachineResult<Option<RegionIdx>> {
         match self.regions.len() {
             n if n == 1 => Ok(Some(self.regions[0])),
             n if n == 0 => Ok(None),
-            _ => Err(StateMachineError::MultipleRegionsInStateMachine(self.dbid)),
+            _ => Err(StateMachineError::ContainsMultipleRegions(self.dbid)),
         }
     }
     // StateMachine::new_vertex
@@ -738,16 +821,16 @@ impl State {
             region: None,
         }
     }
-    fn isSimple(&self) -> bool {
+    fn is_simple(&self) -> bool {
         self.state_type == StateType::Simple
     }
-    fn isComposite(&self) -> bool {
+    fn is_composite(&self) -> bool {
         self.state_type == StateType::Composite
     }
-    fn isOrthogonal(&self) -> bool {
+    fn is_orthogonal(&self) -> bool {
         self.state_type == StateType::Orthogonal
     }
-    fn isSubmachineState(&self) -> bool {
+    fn is_submachine_state(&self) -> bool {
         self.state_type == StateType::Submachine
     }
 
@@ -755,11 +838,13 @@ impl State {
         self.regions.push(region_dbid);
     }
 
+    /// For a State return a Region if there is only one region
+    /// within that state
     fn get_only_region(&self) -> StateMachineResult<Option<RegionIdx>> {
         match self.regions.len() {
             n if n == 1 => Ok(Some(self.regions[0])),
             n if n == 0 => Ok(None),
-            _ => Err(StateMachineError::MultipleRegionsInStateMachine(self.dbid)),
+            _ => Err(StateMachineError::ContainsMultipleRegions(self.dbid)),
         }
     }
 

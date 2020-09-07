@@ -3,9 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Rust Notes</title>
-        
-        <meta name="robots" content="noindex" />
+        <title>Concepts - Rust Notes</title>
         
 
         <meta content="text/html; charset=utf-8" http-equiv="Content-Type">
@@ -83,7 +81,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded "><a href="index.html"><strong aria-hidden="true">1.</strong> Readme</a></li><li class="chapter-item expanded "><a href="intro.html"><strong aria-hidden="true">2.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="concepts.html"><strong aria-hidden="true">3.</strong> Concepts</a></li><li class="chapter-item expanded "><a href="references.html"><strong aria-hidden="true">4.</strong> References</a></li></ol>
+                <ol class="chapter"><li class="chapter-item expanded "><a href="index.html"><strong aria-hidden="true">1.</strong> Readme</a></li><li class="chapter-item expanded "><a href="intro.html"><strong aria-hidden="true">2.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="concepts.html" class="active"><strong aria-hidden="true">3.</strong> Concepts</a></li><li class="chapter-item expanded "><a href="references.html"><strong aria-hidden="true">4.</strong> References</a></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
@@ -149,77 +147,7 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1><a class="header" href="#rust-uml2-statemachine" id="rust-uml2-statemachine">Rust UML2 StateMachine</a></h1>
-<p>A UML2 StateMachine implemenation in Rust programming language.</p>
-<h2><a class="header" href="#goals" id="goals">Goals</a></h2>
-<ul>
-<li>full support for UML 2.x specification</li>
-</ul>
-<h2><a class="header" href="#building-the-associated-book" id="building-the-associated-book">Building the associated Book</a></h2>
-<p>Along with documentation as part of the source code, there is a markdown book in this repo.
-This book is generated using the handy mdbook crate, and published on github.io.</p>
-<ul>
-<li>Build/View the book locally: <code>mdbook build --open</code></li>
-<li>Rebuild/View loop: <code>mdbook watch --open</code></li>
-</ul>
-<h2><a class="header" href="#documentation" id="documentation">Documentation</a></h2>
-<ul>
-<li>View the book:  <a href="https://joemooney.github.io/rust-uml-sm/">https://joemooney.github.io/rust-uml-sm/</a></li>
-<li>Source code: <a href="https://github.com/joemooney/rust-uml-sm/">https://github.com/joemooney/rust-uml-sm/</a>
--- View the book locally: <a href="file:///home/jpm/rust/rust-uml-sm/book/index.html">file:///home/jpm/rust/rust-uml-sm/book/index.html</a></li>
-</ul>
-<h1><a class="header" href="#introduction" id="introduction">Introduction</a></h1>
-<p><sub><span style='color:gray'><em>Last Updated: 2020-09-07 10:43:32</em></span></sub></p>
-<p>This book contains notes on how to use the rust-uml-sm module to create UML2 state machines.</p>
-<p>In order to create this book and play around with Rust, I have used the following tools:</p>
-<ul>
-<li>rust
-<ul>
-<li>cargo
-<ul>
-<li>mdbook</li>
-</ul>
-</li>
-</ul>
-</li>
-<li>GitHub
-<ul>
-<li>GitHub Pages</li>
-</ul>
-</li>
-<li>hub</li>
-<li>git</li>
-<li>rsync</li>
-<li>VS Code
-<ul>
-<li>Extensions (listing ones I like and use, not all needed for this books)
-<ul>
-<li>docs-markdown :star: Alt-M to see help</li>
-<li>Git Graph</li>
-<li>GitLens</li>
-<li>Rust</li>
-<li>TabNine</li>
-<li>Vim</li>
-</ul>
-</li>
-</ul>
-</li>
-<li>Firefox
-<ul>
-<li>Extensions
-<ul>
-<li>vimium - navigate in browser like Vim</li>
-</ul>
-</li>
-</ul>
-</li>
-<li>Linux
-<ul>
-<li>terminator</li>
-</ul>
-</li>
-</ul>
-<h1><a class="header" href="#statemachine-concepts" id="statemachine-concepts">Statemachine Concepts</a></h1>
+                        <h1><a class="header" href="#statemachine-concepts" id="statemachine-concepts">Statemachine Concepts</a></h1>
 <p>This is officially defined here https://www.omg.org/spec/UML/2.5.1/PDF by UML.org</p>
 <p>I will rephrase their words here.</p>
 <p>Simple State: a state without internal Vertices or Transitions.
@@ -314,30 +242,21 @@ reaching its FinalState,triggering of a group Transition originating
 from a submachine State, orvia any of its exit points.Exiting via a
 FinalState or by a group Transition has the same meaning as for ordinary composite States.
 &quot;&quot;&quot;</p>
-<h1><a class="header" href="#references" id="references">References</a></h1>
-<ul>
-<li><a href="https://doc.rust-lang.org/book/title-page.html">Rust Book</a></li>
-<li><a href="https://rust-lang-nursery.github.io/rust-cookbook/">Rust Cookbook</a></li>
-<li><a href="https://play.rust-lang.org">Rust Playground</a></li>
-<li><a href="https://www.tutorialspoint.com/rust/index.htm">Rust Tutorial</a></li>
-<li><a href="https://doc.rust-lang.org/rust-by-example">Rust By Example</a></li>
-<li><a href="https://nikolaivazquez.com/rust-workshop/#1">Rust Powerpoint</a></li>
-</ul>
-<h2><a class="header" href="#excercises" id="excercises">Excercises</a></h2>
-<ul>
-<li><a href="https://projecteuler.net/">Project Euler</a>
-<ul>
-<li>No solutions, just do these exercises as practice.</li>
-</ul>
-</li>
-</ul>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
                         
+                            <a rel="prev" href="intro.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+                        
 
+                        
+                            <a rel="next" href="references.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
                         
 
                         <div style="clear: both"></div>
@@ -347,7 +266,15 @@ FinalState or by a group Transition has the same meaning as for ordinary composi
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
                 
+                    <a rel="prev" href="intro.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+                
 
+                
+                    <a rel="next" href="references.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
                 
             </nav>
 
@@ -380,14 +307,6 @@ FinalState or by a group Transition has the same meaning as for ordinary composi
         <!-- Custom JS scripts -->
         
 
-        
-        
-        <script type="text/javascript">
-        window.addEventListener('load', function() {
-            window.setTimeout(window.print, 100);
-        });
-        </script>
-        
         
 
     </body>
