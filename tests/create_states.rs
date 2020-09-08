@@ -40,7 +40,7 @@ fn test_create_sm_regions() {
     let regions = vec![1];
     assert_eq!(sm.sm_regions(), regions);
     assert_eq!(sm.name(1).unwrap(), "region_1");
-    sm.add_sm_region("region_x");
+    assert_eq!(sm.add_sm_region("region_x").unwrap(), 1);
     assert_eq!(sm.name(1).unwrap(), "region_x");
     let region_y = sm.add_sm_region("region_y").unwrap();
     assert_eq!(sm.name(region_y).unwrap(), "region_y");
@@ -100,7 +100,7 @@ fn test_query_regions() {
     let s1 = sm.add_substate("s1", r1).unwrap();
     let s2 = sm.add_substate("s2", r1).unwrap();
     let s3 = sm.add_substate("s3", s2).unwrap();
-    let s4 = sm.add_substate("s4", s3).unwrap();
+    let _ = sm.add_substate("s4", s3).unwrap();
     println!("{:#?}", sm);
     assert_eq!(sm.sm_regions(), vec![r1, r2]);
     assert_eq!(sm.regions(s1).unwrap(), vec![]);
@@ -134,7 +134,7 @@ fn test_ancestor() {
 fn test_lca() {
     let mut sm = StateMachine::new("sm1");
     let r1 = sm.add_sm_region("r1").unwrap();
-    let r2 = sm.add_sm_region("r2").unwrap();
+    let _ = sm.add_sm_region("r2").unwrap();
     let s1 = sm.add_substate("s1", r1).unwrap();
     let s2 = sm.add_substate("s2", r1).unwrap();
     let s3 = sm.add_substate("s3", s2).unwrap();
@@ -144,4 +144,46 @@ fn test_lca() {
     assert_eq!(sm.lca(s2, s1).unwrap(), r1);
     assert_eq!(sm.lca(s3, s1).unwrap(), r1);
     assert_eq!(sm.lca(s4, s3).unwrap(), sm.get_only_region(s2).unwrap());
+}
+
+#[test]
+fn test_lca_state() {
+    let mut sm = StateMachine::new("sm1");
+    let r1 = sm.add_sm_region("r1").unwrap();
+    let _ = sm.add_sm_region("r2").unwrap();
+    let s1 = sm.add_substate("s1", r1).unwrap();
+    let s2 = sm.add_substate("s2", r1).unwrap();
+    let s3 = sm.add_substate("s3", s2).unwrap();
+    let s4 = sm.add_substate("s4", s3).unwrap();
+    assert_eq!(sm.lca_state(r1, s1).unwrap(), sm.dbid);
+    assert_eq!(sm.lca_state(s1, s1).unwrap(), sm.dbid);
+    assert_eq!(sm.lca_state(s2, s1).unwrap(), sm.dbid);
+    assert_eq!(sm.lca_state(s3, s1).unwrap(), sm.dbid);
+    assert_eq!(sm.lca_state(s4, s3).unwrap(), s2);
+}
+
+#[test]
+fn test_state_type() {
+    let mut sm = StateMachine::new("sm1");
+    let r1 = sm.add_sm_region("r1").unwrap();
+    let _ = sm.add_sm_region("r2").unwrap();
+    let s1 = sm.add_substate("s1", r1).unwrap();
+    let s2 = sm.add_substate("s2", r1).unwrap();
+    let s3 = sm.add_substate("s3", s2).unwrap();
+    let r3 = sm.add_region("r3", s3).unwrap();
+    let r4 = sm.add_region("r4", s3).unwrap();
+    let s4 = sm.add_substate("s4", r3).unwrap();
+    let s5 = sm.add_substate("s5", r4).unwrap();
+    sm.print(0).unwrap();
+    sm.print(s1).unwrap();
+    assert_eq!(sm.is_simple(s1).unwrap(), true);
+    assert_eq!(sm.is_composite(s1).unwrap(), false);
+    assert_eq!(sm.is_simple(s2).unwrap(), false);
+    assert_eq!(sm.is_composite(s2).unwrap(), true);
+    assert_eq!(sm.is_orthogonal(s2).unwrap(), false);
+    assert_eq!(sm.is_simple(s3).unwrap(), false);
+    assert_eq!(sm.is_composite(s3).unwrap(), true);
+    assert_eq!(sm.is_orthogonal(s3).unwrap(), true);
+    assert_eq!(sm.is_simple(s4).unwrap(), true);
+    assert_eq!(sm.is_simple(s5).unwrap(), true);
 }

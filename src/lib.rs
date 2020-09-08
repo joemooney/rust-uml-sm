@@ -1,8 +1,8 @@
-use std::collections::HashMap;
+// use std::collections::HashMap;
 use std::fmt;
-use std::process;
+// use std::process;
 // use std::io::{self, Write};
-//use std::string::ToString;
+// use std::string::ToString;
 
 /// StateMachineError enumerates all possible errors returned by this library.
 #[derive(Debug)]
@@ -62,37 +62,6 @@ impl From<std::io::Error> for StateMachineError {
     }
 }
 
-/*
-Simple State: a state without internal Vertices or Transitions.
-Composite State: a state with at least one Region.
-Submachine State: a state referencing to another StateMachine, conceptually, nested within the State.
-Simple composite State: has exactly one Region
-Orthogonal State: has multiple Regions (isOrthogonal = true).
-
-Substate: a State enclosed within a Region of a composite State is called a substate of that composite State.
-Direct Substate: a substate of a region but not nested in another substate;
-Indirect substate: a nested substate of a region.
-
-a StateMachine can have multiple Regions, each of which may contain States of its own, some of which maybe composites with their own multiple Regions, etc. Consequently,
-Active State: For a region or composite state, the particular substate to which we have currently transitioned.
-Active State Configuration: Recursively, the active states for all regions.
-
-""
-StateMachine execution is represented by transitions from one active state configuration to another in response to Eventoccurrences
-that match the Triggers of the StateMachine.A State is said to be active if it is part of the active state configuration.A state configuration is said to be stable when:no further Transitions from that state configuration are enabled andall the entry Behaviors of that configuration, if present, have completed (but not necessarily the doActivityBehaviors of that configuration, which, if defined, may continue executing).After it has been created and completed its initial Transition, a StateMachine is always “in” some state configuration. However, because States can be hierarchical and because there can be Behaviors associated with both Transitions and States, “entering” a hierarchical state configuration involves a dynamic process that terminates only after a stable state configuration (as defined above) is reached. This creates some potential ambiguity as to precisely when a StateMachine is “in” a particular state within a state configuration. The rules for when a StateMachine is deemed to be “in” a State and when it is deemed to have “left” a State are described below in the sections “Entering a State” and “Exiting a State respectively.
-A configuration is deemed stable even if there are deferred, completion, or any other types of Event occurrences pending in the event pool of that StateMachine
- State may have an associated entry Behavior. This Behavior, if defined, is executed whenever the State is entered through an externalTransition. In addition, a State may also have an associated exit Behavior, which, if defined, is executed whenever the State is exited.A State may also have an associated doActivity Behavior. This Behavior commences execution when the State is entered (but only after the State entry Behavior has completed) and executes concurrently with any other Behaviors that may be associated with the State, until:it completes (in which case a completion event is generated) orthe State is exited, in which case execution of the doActivity Behavior is aborted.The execution of a doActivity Behavior of a State is not affected by the firing of an internalTransition of that State
-The concept of State history was introduced by David Harel in the original statechart formalism. It is a convenience concept associated with Regions of composite States whereby a Region keeps track of the state configuration it was in when it was last exited. This allows easy return to that same state configuration, if desired, the next time the Region becomes active (e.g., after returning from handling an interrupt), or if there is a local Transition that returns to its history. This is achieved simply by terminating a Transition on the desired type of history Pseudostate inside the Region.The advantage provided by this facility is that it eliminates the need for users to explicitly keep track of history in cases where this type of behavior is desired, which can result in significantly simpler state machine models.Two types of history Pseudostates are provided. Deep history (deepHistory) represents the full state configuration of the most recent visit to the containing Region. The effect is the same as if the Transition terminating on the deepHistoryPseudostate had, instead, terminated on the innermost State of the preserved state configuration, including execution of all entry Behaviors encountered along the way. Shallow history (shallowHistory) represents a return to only the topmost substate of the most recent state configuration, which is entered using the default entry rule.In cases where a Transition terminates on a history Pseudostate when the State has not been entered before (i.e., no priorhistory) or it had reached its FinalState, there is an option to force a transition to a specific substate, using the default history mechanism. This is a Transition that originates in the history Pseudostate and terminates on a specific Vertex (thedefault history state) of the Region containing the history Pseudostate. This Transition is only taken if execution leads tothe history Pseudostate and the State had never been active before. Otherwise, the appropriate history entry into the Region is executed (see above). If no default history Transition is defined, then standard default entry of the Region is performed as explained below.Deferred Events A State may specify a set of Event types that may be deferred in that State. This means that Event occurrences of those types will not be dispatched as long as that State remains active. Instead, these Event occurrences remain in the event pool until:a state configuration is reached where these Event types are no longer deferred or,if a deferred Event type is used explicitly in a Trigger of a Transition whose source is the deferring State (i.e., akind of override option).An Event may be deferred by a composite State or submachine States, in which case it remains deferred as long as the composite State remains in the active configuration.
-The semantics of entering a State depend on the type of State and the manner in which it is entered. However, in all cases, the entry Behavior of the State is executed (if defined) upon entry, but only after any effect Behavior associated
-with the incoming Transition is completed. Also, if a doActivity Behavior is defined for the State, this Behavior commences execution immediately after the entry Behavior is executed. It executes concurrently with any subsequent Behaviors associated with entering the State, such as the entry Behaviors of substates entered as part of the same compound transition.The above description fully covers the case of simple States. For composite States with a single Region the following alternatives exist:Default entry: This situation occurs when the composite State is the direct target of a Transition (graphically, this is indicated by an incoming Transition that terminates on the outside edge of the composite State). After executing the entry Behavior and forking a possible doActivity Behavior execution, if an initial Pseudostate is defined, State entry continues from that Vertex via its outgoing Transition (known as the default Transition of the State). If no initial Pseudostate is defined, there is no single approach defined. One alternative is to treat such a model as ill formed. A second alternative is to treat the composite State as a simple State, terminating the traversal on that State despite its internal parts.Explicit entry: If the incoming Transition or its continuations terminate on a directly contained substate of the composite State, then that substate becomes active and its entry Behavior is executed after the execution of the entry Behavior of the containing composite State. This rule applies recursively if the Transition terminates on an indirect (deeply nested) substate.Shallow history entry: If the incoming Transition terminates on a shallowHistory Pseudostate of a Region of the composite State, the active substate becomes the substate that was most recently active prior to this entry, unless:othe most recently active substate is the FinalState, oro this is the first entry into this State.oIn the latter two cases, if a default shallow history Transition is defined originating from the shallowHistory Pseudostate, it will be taken. Otherwise, default State entry is applied.Deep history entry: The rule for this case is the same as for shallow history except that the target Pseudostate is of type deepHistory and the rule is applied recursively to all levels in the active state configuration below this one.Entry point entry: If a Transition enters a composite State through an entryPointPseudostate, then the effectBehavior associated with the outgoing Transition originating from the entry point and penetrating into the State(but after the entry Behavior of the composite State has been executed).If the composite State is also an orthogonal State with multiple Regions, each of its Regions is also entered, either by default or explicitly. If the Transition terminates on the edge of the composite State (i.e., without entering the State), then all the Regions are entered using the default entry rule above. If the Transition explicitly enters one or more Regions (in case of a fork), these Regions are entered explicitly and the others by default.Regardless of how a State is entered, the StateMachine is deemed to be “in” that State even before any entry Behavior oreffect Behavior (if defined) of that State start executing.
-When exiting a State, regardless of whether it is simple or composite, the final step involved in the exit, after all other Behaviors associated with the exit are completed, is the execution of the exit Behavior of that State. If the State has a doActivity Behavior that is still executing when the State is exited, that Behavior is aborted before the exit Behavior commences execution.When exiting from a composite State, exit commences with the innermost State in the active state configuration. This means that exit Behaviors are executed in sequence starting with the innermost active State. If the exit occurs through anexitPointPseudostate, then the exit Behavior of the State is executed after the effect Behavior of the Transition terminating on the exit point.
-When exiting from an orthogonal State, each of its Regions is exited. After that, the exit Behavior of the State is executed.Regardless of how a State is exited, the StateMachine is deemed to have “left” that State only after the exit Behavior (if defined) of that State has completed execution.Encapsulated composite StatesIn some modeling situations, it is useful to encapsulate a composite State, by not allowing Transitions to penetrate directly into the State to terminate on one of its internal Vertices. (One common use case for this is when the internals ofa State in an abstract Classifier are intended to be specified differently in different subtype refinements of the abstract Classifier.) Despite the encapsulation, it is often necessary to bind the internal elements of the composite State with incoming and outgoing Transitions. This is done by means of entry and exit points, which are realized via the entryPointand exitPointPseudostates.Entry points represent termination points (sources) for incoming Transitions and origination points (targets) for Transitions that terminate on some internal Vertex of the composite State. In effect, the latter is a continuation of the external incoming Transition, with the proviso that the execution of the entry Behavior of the composite State (if defined) occurs between the effect Behavior of the incoming Transition and the effect Behavior of the outgoing Transition. If there is no outgoing Transition inside the composite State, then the incoming Transition simply performs adefault State entry.Exit points are the inverse of entry points. That is, Transitions originating from a Vertex within the composite State can terminate on the exit point. In a well-formed model, such a Transition should have a corresponding external Transition outgoing from the same exit point, representing a continuation of the terminating Transition. If the composite State has an exit Behavior defined, it is executed after any effect Behavior of the incoming inside Transition and before any effectBehavior of the outgoing external Transition.
-Submachines are a means by which a single StateMachine specification can be reused multiple times. They are similar to encapsulated composite States in that they need to bind incoming and outgoing Transitions to their internal Vertices. However, whereas encapsulated composite States and their internals are contained within the StateMachine in which they are defined, submachines are, like programming language macros, distinct Behavior specifications, which may be defined in a different context than the one where they are used (invoked). Consequently, they require a more complex binding. This is achieved through the concept of submachine State (i.e., States with isSubmachineState = true), which represent references to corresponding submachine StateMachines. The concept of ConnectionPointReference is provided to support binding between the submachine State and the referenced StateMachine. A ConnectionPointReference represents a point on the submachine State at which a Transition either terminates or originates. That is, they serve as targets for incoming Transitions to submachine States, as well as sources for outgoing Transitions from submachine States. Each ConnectionPointReference is matched by a corresponding entry or exit point in the referenced submachine StateMachine. This provides the necessary binding mechanism between the submachine invocation and its specification.A submachine State implies a macro-like insertion of the specification of the corresponding submachine StateMachine. It is, therefore, semantically equivalent to a composite State. The Regions of the submachine StateMachine are the Regions of the composite State. The entry, exit, and effect Behaviors and internal Transitions are defined as contained in the submachine State.NOTE. Each submachine State represents a distinct instantiation of a submachine, even when two or more submachine States reference the same submachine.A submachine StateMachine can be entered via its default (initial) Pseudostate or via any of its entry points (i.e., it may imply entering a non-orthogonal or an orthogonal composite State with Regions). Entering via the initial Pseudostate hasthe same meaning as for ordinary composite States. An entry point is equivalent to a junctionPseudostate (forkin cases where the composite State is orthogonal): Entering via an entry point implies that the entry Behavior of the composite state is executed, followed by the Transition from the entry point to the target Vertex within the composite State. Any guards associated with these entry point Transitions must evaluate to true in order for the specification to be well formed.alloc
-
-Similarly, a submachine Statemachine can be exited as a result of:reaching its FinalState,triggering of a group Transition originating from a submachine State, orvia any of its exit points.Exiting via a FinalState or by a group Transition has the same meaning as for ordinary composite States.
-""
-*/
-
 type Name = &'static str;
 pub type StateMachineResult<T> = Result<T, StateMachineError>;
 
@@ -111,7 +80,7 @@ enum ElementType {
 }
 
 #[derive(Debug, Copy, Clone)]
-pub struct Element {
+struct Element {
     dbid: usize, // index into arena db of elements
     idx: usize,  // index into arena db of element type
     element_type: ElementType,
@@ -124,16 +93,6 @@ impl Element {
             element_type,
         }
     }
-}
-
-struct ElementName {
-    name: Name,
-    fullname: Name,
-}
-
-enum DbElement {
-    Element(Element),
-    DbId(DbId),
 }
 
 // Improve code readability, aliases for specific cases
@@ -149,6 +108,7 @@ type TransitionId = usize;
 pub struct Db {
     name: Name,
     elements: Vec<Element>,
+    pub dbid: DbId,
     state_machine: StateMachineDef,
     states: Vec<State>,
     parents: Vec<DbId>,
@@ -169,6 +129,7 @@ impl Db {
     pub fn new(name: Name) -> Self {
         let mut db = Db {
             name,
+            dbid: 0,
             elements: Vec::new(),
             states: Vec::new(),
             parents: Vec::new(),
@@ -217,7 +178,11 @@ impl Db {
 
     pub fn fullname(&self, dbid: DbId) -> StateMachineResult<&String> {
         self.is_valid_dbid(dbid)?;
-        Ok(&self.fullnames[dbid])
+        Ok(self._fullname(dbid))
+    }
+
+    fn _fullname(&self, dbid: DbId) -> &String {
+        &self.fullnames[dbid]
     }
 
     pub fn region(&self, dbid: DbId) -> StateMachineResult<DbId> {
@@ -227,6 +192,91 @@ impl Db {
             ElementType::Region => Ok(dbid),
             ElementType::StateMachine => Err(StateMachineError::InvalidVertex(dbid)),
         }
+    }
+
+    /// Return true if dbid is a State
+    /// Mostly, It is easiest to consider a state machine as a state since
+    /// There is no useful distinction between them for our purposes.
+    pub fn is_state(&self, dbid: DbId) -> StateMachineResult<bool> {
+        match self.element(dbid)?.element_type {
+            ElementType::Vertex(VertexType::State) => Ok(true),
+            // ElementType::StateMachine => Ok(true),
+            _ => Ok(false),
+        }
+    }
+
+    pub fn to_string(&self, dbid: DbId) -> StateMachineResult<String> {
+        let ele = self.element(dbid)?;
+        match ele.element_type {
+            ElementType::Vertex(_) => Ok(self.vertex_to_string(&self.vertices[ele.idx])),
+            ElementType::StateMachine => Ok(format!("{:#?}", self.state_machine)),
+            ElementType::Region => Ok(format!("{:#?}", self.regions[ele.idx])),
+        }
+    }
+
+    fn vertex_to_string_body(&self, v: &VertexDef) -> String {
+        format!(
+            r#"    name: {},
+    fullname: {},
+    dbid: {},
+    idx: {},
+    vertex_type: {:#?},
+    container: {},
+    incoming: {},
+    outgoing: {},"#,
+            v.name,
+            self._fullname(v.dbid),
+            v.dbid,
+            v.idx,
+            v.vertex_type,
+            self._fullname(v.container),
+            v.incoming.len(),
+            v.outgoing.len()
+        )
+    }
+
+    fn vertex_to_string(&self, v: &VertexDef) -> String {
+        match self.elements[v.dbid].element_type {
+            ElementType::Vertex(VertexType::State) => self.state_to_string_body(v),
+            _ => format!("Not implemented: {:#?}", v),
+        }
+    }
+
+    fn state_to_string_body(&self, v: &VertexDef) -> String {
+        let s = &self.states[v.idx];
+        format!(
+            r#"xState {{
+{}
+    state_type: {:#?},
+    regions: {:#?},
+    region: {:#?},
+}}"#,
+            self.vertex_to_string_body(v),
+            s.state_type,
+            s.regions,
+            s.region
+        )
+    }
+
+    pub fn print(&self, dbid: DbId) -> StateMachineResult<()> {
+        println!("{}", self.to_string(dbid)?);
+        Ok(())
+    }
+
+    pub fn is_simple(&self, dbid: DbId) -> StateMachineResult<bool> {
+        let s_idx = self.get_state_by_dbid(dbid)?;
+        println!("{:#?}", self.states[s_idx]);
+        Ok(self.states[s_idx].is_simple())
+    }
+
+    pub fn is_composite(&self, dbid: DbId) -> StateMachineResult<bool> {
+        let s_idx = self.get_state_by_dbid(dbid)?;
+        Ok(self.states[s_idx].is_composite())
+    }
+
+    pub fn is_orthogonal(&self, dbid: DbId) -> StateMachineResult<bool> {
+        let s_idx = self.get_state_by_dbid(dbid)?;
+        Ok(self.states[s_idx].is_orthogonal())
     }
 
     pub fn is_valid_dbid(&self, dbid: DbId) -> StateMachineResult<()> {
@@ -240,13 +290,6 @@ impl Db {
     pub fn name(&self, dbid: DbId) -> StateMachineResult<Name> {
         self.is_valid_dbid(dbid)?;
         Ok(self.names[dbid])
-        /*
-        match self.elements[dbid].element_type {
-            ElementType::Vertex(_) => Ok(self.vertices[self.elements[dbid].idx].name),
-            ElementType::Region => Ok(self.regions[self.elements[dbid].idx].name),
-            ElementType::StateMachine => Ok(self.name),
-        }
-        */
     }
 
     fn is_duplicate(&self, name: Name, vec: &Vec<DbId>) -> bool {
@@ -262,13 +305,13 @@ impl Db {
     }
 
     pub fn add_substate(&mut self, name: Name, parent: DbId) -> StateMachineResult<DbId> {
-        let p_ele = self.get_element(parent)?;
+        let p_ele = self.element(parent)?;
         println!("{:#?}", self);
         println!("Adding Substate to: {:#?}", p_ele);
         let r_dbid = match p_ele.element_type {
             ElementType::Vertex(VertexType::State) => {
                 let p_state_idx = self.get_state_by_ele(p_ele)?;
-                println!("Adding Substate to: s_idx:{}", p_state_idx);
+                println!("Adding Substate to: s_idx:{} ", p_state_idx);
                 match self.states[p_state_idx].get_only_region()? {
                     Some(r_dbid) => r_dbid,
                     None => self.add_region("region_1", p_ele.dbid)?,
@@ -350,6 +393,12 @@ impl Db {
         }
     }
 
+    /// Return the least common ancestor State of s1 and s2
+    /// This is the owning state of the lca Region.
+    pub fn lca_state(&self, s1: DbId, s2: DbId) -> StateMachineResult<DbId> {
+        Ok(self.parents[self.lca(s1, s2)?])
+    }
+
     /*
     fn parent_container_dbid(&self, child: DbId) -> StateMachineResult<DbId> {
         let idx = self.elements[child];
@@ -383,7 +432,7 @@ impl Db {
     }
 
     pub fn regions(&self, dbid: DbId) -> StateMachineResult<Vec<RegionDbId>> {
-        let ele = self.get_element(dbid)?;
+        let ele = self.element(dbid)?;
         match ele.element_type {
             ElementType::Vertex(VertexType::State) => Ok(self.states[ele.idx].regions.clone()),
             ElementType::StateMachine => Ok(self.state_machine.regions.clone()),
@@ -391,6 +440,9 @@ impl Db {
         }
     }
 
+    /// In the case where the state machine or state return the
+    /// region dbid for the one region it contains or an error
+    /// if there are is than one region defined.
     pub fn get_only_region(&self, dbid: DbId) -> StateMachineResult<RegionDbId> {
         let regions = self.regions(dbid)?;
         match regions.len() {
@@ -411,13 +463,39 @@ impl Db {
         }
     }
 
-    fn add_region(&mut self, name: Name, parent: DbId) -> StateMachineResult<DbId> {
+    pub fn add_region(&mut self, name: Name, parent: DbId) -> StateMachineResult<DbId> {
         let dbid = self.elements.len();
         //let ele_type = self.get_element_type(parent).expect("Invalid parent");
-        let p_ele = self.get_element(parent)?;
+        let p_ele = self.element(parent)?;
+        // let existing_regions = self.regions(parent)?;
+        // let n = existing_regions.len();
         let c = match p_ele.element_type {
-            ElementType::Vertex(VertexType::State) => Container::State(p_ele.dbid),
-            ElementType::StateMachine => Container::StateMachine(p_ele.dbid),
+            ElementType::Vertex(VertexType::State) => {
+                /*
+                if n == 1 {
+                    let r_dbid = existing_regions[0];
+                    if self.elements[r_dbid].name == "region_1" {
+                        self.rename(r_dbid, name);
+                        self.regions[self.elements[r_dbid].idx].name = name;
+                        return Ok(1);
+                    }
+                }
+                */
+                Container::State(p_ele.dbid)
+            }
+            ElementType::StateMachine => {
+                /*
+                if n == 1 {
+                    let r_dbid = existing_regions[0];
+                    if self.elements[r_dbid].name == "region_1" {
+                        self.rename(r_dbid, name);
+                        self.regions[self.elements[r_dbid].idx].name = name;
+                        return Ok(1);
+                    }
+                }
+                */
+                Container::StateMachine(p_ele.dbid)
+            }
             _ => return Err(StateMachineError::InvalidState(parent)),
         };
         // TODO: need to check if a region of the same name already exists
@@ -429,19 +507,6 @@ impl Db {
         Ok(dbid)
     }
 
-    /*
-    fn add_region(&mut self, region_dbid: DbId, container: DbId) -> StateMachineResult<DbId> {
-        let c_ele = self.get_element(container)?;
-        match c_ele.element_type {
-            ElementType::Vertex(VertexType::State) => {
-                let s_idx = self.get_state_by_dbid(c_ele.dbid)?;
-                self.states[s_idx].add_region(region_dbid)
-            }
-            ElementType::StateMachine => self.state_machine.add_region(region_dbid),
-        }
-    }
-    */
-
     fn add_region_to_container(&mut self, c: Container, region_dbid: DbId) {
         match c {
             Container::State(s_dbid) => {
@@ -452,24 +517,17 @@ impl Db {
         };
     }
 
-    fn get_element(&self, dbid: DbId) -> StateMachineResult<Element> {
+    fn element(&self, dbid: DbId) -> StateMachineResult<Element> {
         if dbid < self.elements.len() {
             return Ok(self.elements[dbid]);
         } else {
-            return Err(StateMachineError::ElementNotFound(dbid));
+            return Err(StateMachineError::InvalidDbId(dbid));
         }
     }
 
-    // fn get_region(&self, ele: DbElement) -> StateMachineResult<RegionIdx> {
-    //     match ele {
-    //         DbElement::DbId(dbid) => self.get_region_by_dbid(dbid),
-    //         DbElement::Element(e) => self.get_region_by_ele(e),
-    //     }
-    // }
-
     fn get_region_by_dbid(&self, dbid: DbId) -> StateMachineResult<RegionIdx> {
         println!("get_region_by_dbid: {:?}", dbid);
-        let ele = self.get_element(dbid)?;
+        let ele = self.element(dbid)?;
         println!("got_region_by_dbid: {:?}", ele);
         self.get_region_by_ele(ele)
     }
@@ -485,15 +543,8 @@ impl Db {
         }
     }
 
-    // fn get_state(&self, ele: DbElement) -> StateMachineResult<StateIdx> {
-    //     match ele {
-    //         DbElement::DbId(dbid) => self.get_state_by_dbid(dbid),
-    //         DbElement::Element(e) => self.get_state_by_ele(e),
-    //     }
-    // }
-
     fn get_state_by_dbid(&self, dbid: DbId) -> StateMachineResult<StateIdx> {
-        let ele = self.get_element(dbid)?;
+        let ele = self.element(dbid)?;
         self.get_state_by_ele(ele)
     }
 
@@ -507,16 +558,9 @@ impl Db {
         }
     }
 
-    // fn get_vertex(&self, ele: DbElement) -> StateMachineResult<VertexIdx> {
-    //     match ele {
-    //         DbElement::DbId(dbid) => self.get_vertex_by_dbid(dbid),
-    //         DbElement::Element(e) => self.get_vertex_by_ele(e),
-    //     }
-    // }
-
     fn get_vertex_by_dbid(&self, dbid: DbId) -> StateMachineResult<VertexIdx> {
         println!("get_vertex_by_dbid: dbid:{:?}", dbid);
-        let ele = self.get_element(dbid)?;
+        let ele = self.element(dbid)?;
         println!("got_vertex_by_dbid: ele:{:?}", ele);
         self.get_vertex_by_ele(ele)
     }
@@ -783,25 +827,6 @@ impl Region {
             transition: Vec::new(),
         }
     }
-    /// Return bool is this region is within a given state:
-    /// either the given state owns the region directly or
-    /// indirectly.
-    /// This function walks from innermost to outermost.
-    /// isContainedInState
-    fn is_contained_in_state(&self, db: &Db, dbid: usize) -> StateMachineResult<bool> {
-        match self.container {
-            Container::State(s_dbid) => {
-                if s_dbid == dbid {
-                    Ok(true)
-                } else {
-                    // let v = s as &dyn Vertex;
-                    let s_idx = db.get_state_by_dbid(s_dbid).expect("Invalid state");
-                    db.states[s_idx].is_contained_in_state(db, dbid)
-                }
-            }
-            Container::StateMachine(_) => Ok(false),
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -822,17 +847,16 @@ impl State {
         }
     }
     fn is_simple(&self) -> bool {
-        self.state_type == StateType::Simple
+        self.regions.len() == 0
     }
     fn is_composite(&self) -> bool {
-        self.state_type == StateType::Composite
+        self.regions.len() > 0
     }
     fn is_orthogonal(&self) -> bool {
-        self.state_type == StateType::Orthogonal
+        self.regions.len() > 1
     }
-    fn is_submachine_state(&self) -> bool {
-        self.state_type == StateType::Submachine
-    }
+    // fn is_submachine_state(&self) -> bool {
+    // }
 
     fn add_region(&mut self, region_dbid: DbId) {
         self.regions.push(region_dbid);
