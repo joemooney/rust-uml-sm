@@ -9,6 +9,7 @@ use std::fmt;
 pub enum StateMachineError {
     /// Represents an empty source. For example, an empty text file being given
     /// as input to `count_words()`.
+    Duplicate(Name),
     VertexAlreadyAdded(Name),
     VertexAlreadyInDifferentRegion(Name),
     ElementNotFound(DbId),
@@ -72,11 +73,28 @@ enum VertexType {
     FinalState,
 }
 
+/// Spec has lowercase for some of these Enums
+#[derive(Debug, Clone, Copy)]
+enum PseudostateKind {
+    EntryPoint,
+    ExitPoint,
+    Initial,
+    DeepHistory,
+    ShallowHistory,
+    Join,
+    Fork,
+    Junction,
+    Terminate,
+    Choice,
+}
+
 #[derive(Debug, Copy, Clone)]
 enum ElementType {
     Vertex(VertexType),
     Region,
     StateMachine,
+    Transition,
+    EventType,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -102,7 +120,8 @@ type RegionDbId = usize;
 type DbId = usize;
 type StateIdx = usize;
 type VertexIdx = usize;
-type TransitionId = usize;
+type TriggerIdx = usize;
+type TransitionIdx = usize;
 
 #[derive(Debug)]
 pub struct Db {
@@ -111,6 +130,9 @@ pub struct Db {
     pub dbid: DbId,
     state_machine: StateMachineDef,
     states: Vec<State>,
+    transitions: Vec<Transition>,
+    event_types: Vec<EventType>,
+    guards: Vec<Guard>,
     parents: Vec<DbId>,
     names: Vec<Name>,
     fullnames: Vec<String>,
@@ -126,12 +148,21 @@ pub enum ReportType {
 }
 
 impl Db {
+    /// Create a new StateMachine.
+    /// The constructed statemachine will have a single region
+    /// automatically added and named "region_1". If you then
+    /// call add_sm_region("region_name") before adding any
+    /// vertices to the default region then the default region will be
+    /// renamed.
     pub fn new(name: Name) -> Self {
         let mut db = Db {
             name,
             dbid: 0,
             elements: Vec::new(),
             states: Vec::new(),
+            transitions: Vec::new(),
+            event_types: Vec::new(),
+            guards: Vec::new(),
             parents: Vec::new(),
             vertices: Vec::new(),
             names: Vec::new(),
@@ -176,6 +207,9 @@ impl Db {
         }
     }
 
+    /// Given a dbid return the fully qualified path name from
+    /// the statemachine and region recursively down to the element
+    /// corresponding to the dbid.
     pub fn fullname(&self, dbid: DbId) -> StateMachineResult<&String> {
         self.is_valid_dbid(dbid)?;
         Ok(self._fullname(dbid))
@@ -185,12 +219,18 @@ impl Db {
         &self.fullnames[dbid]
     }
 
-    pub fn region(&self, dbid: DbId) -> StateMachineResult<DbId> {
+    /// Given the dbid of a vertex return the dbid of region in
+    /// which it is directly contained.
+    pub fn owning_region(&self, dbid: DbId) -> StateMachineResult<DbId> {
         self.is_valid_dbid(dbid)?;
         match self.elements[dbid].element_type {
             ElementType::Vertex(_) => Ok(self.vertices[self.elements[dbid].idx].container),
             ElementType::Region => Ok(dbid),
             ElementType::StateMachine => Err(StateMachineError::InvalidVertex(dbid)),
+            ElementType::EventType => Err(StateMachineError::InvalidVertex(dbid)),
+            ElementType::Transition => {
+                Ok(self.vertices[self.transitions[self.elements[dbid].idx].source].container)
+            }
         }
     }
 
@@ -205,12 +245,15 @@ impl Db {
         }
     }
 
+    /// Return a pretty print string for an element
     pub fn to_string(&self, dbid: DbId) -> StateMachineResult<String> {
         let ele = self.element(dbid)?;
         match ele.element_type {
             ElementType::Vertex(_) => Ok(self.vertex_to_string(&self.vertices[ele.idx])),
             ElementType::StateMachine => Ok(format!("{:#?}", self.state_machine)),
             ElementType::Region => Ok(format!("{:#?}", self.regions[ele.idx])),
+            ElementType::EventType => Ok(format!("{:#?}", self.event_types[ele.idx])),
+            ElementType::Transition => Ok(format!("{:#?}", self.transitions[ele.idx])),
         }
     }
 
@@ -258,27 +301,32 @@ impl Db {
         )
     }
 
+    /// Pretty print an element (region/state/...)
     pub fn print(&self, dbid: DbId) -> StateMachineResult<()> {
         println!("{}", self.to_string(dbid)?);
         Ok(())
     }
 
+    /// Return true if the given state does not have any regions
     pub fn is_simple(&self, dbid: DbId) -> StateMachineResult<bool> {
         let s_idx = self.get_state_by_dbid(dbid)?;
         println!("{:#?}", self.states[s_idx]);
         Ok(self.states[s_idx].is_simple())
     }
 
+    /// Return true if the given state has exactly on region
     pub fn is_composite(&self, dbid: DbId) -> StateMachineResult<bool> {
         let s_idx = self.get_state_by_dbid(dbid)?;
         Ok(self.states[s_idx].is_composite())
     }
 
+    /// Return true if the given state has one or more on region
     pub fn is_orthogonal(&self, dbid: DbId) -> StateMachineResult<bool> {
         let s_idx = self.get_state_by_dbid(dbid)?;
         Ok(self.states[s_idx].is_orthogonal())
     }
 
+    /// Return true if the given dbid is a valid element in the state machine
     pub fn is_valid_dbid(&self, dbid: DbId) -> StateMachineResult<()> {
         if dbid >= self.elements.len() {
             Err(StateMachineError::InvalidDbId(dbid))
@@ -287,23 +335,81 @@ impl Db {
         }
     }
 
+    /// Return the short name for an element.
     pub fn name(&self, dbid: DbId) -> StateMachineResult<Name> {
         self.is_valid_dbid(dbid)?;
         Ok(self.names[dbid])
     }
 
-    fn is_duplicate(&self, name: Name, vec: &Vec<DbId>) -> bool {
-        vec.iter().any(|&i| match self.elements[i].element_type {
+    fn is_duplicate(&self, name: Name, vec: &Vec<DbId>) -> StateMachineResult<()> {
+        match vec.iter().any(|&i| match self.elements[i].element_type {
+            // ElementType::Transition => self.transitions[self.elements[i].idx].name == name,
             ElementType::Vertex(_) => self.vertices[self.elements[i].idx].name == name,
             ElementType::Region => self.regions[self.elements[i].idx].name == name,
+            ElementType::Transition => self.transitions[self.elements[i].idx].name == name,
             _ => true,
-        })
+        }) {
+            true => Err(StateMachineError::Duplicate(name)),
+            false => Ok(()),
+        }
     }
 
+    /// Add a transtion between two vertices to the state machine.
+    /// The parent is defaulted to the owning region of the source vertex.VertexIdx
+    /// The parent matters if the transition line connecting the vertices
+    /// goes outside of the lca region - we would be saying the parent is
+    /// the real lcx region in that case.
+    pub fn add_event_type(&mut self, name: Name) -> StateMachineResult<DbId> {
+        let e_idx = self.event_types.len();
+        let parent = 0;
+        let x = self.event_types.iter().map(|ev| ev.dbid).collect();
+        self.is_duplicate(name, &x)?;
+        let dbid = self.new_element(name, parent, e_idx, ElementType::Transition);
+        self.event_types.push(EventType::new(name, dbid));
+        Ok(dbid)
+    }
+
+    pub fn check_transition(&mut self, transition_dbid: TransitionIdx) -> StateMachineResult<bool> {
+        Ok(self.transitions[self.transition(transition_dbid)?].check())
+    }
+
+    /// Add a transtion between two vertices to the state machine.
+    /// The parent is defaulted to the owning region of the source vertex.VertexIdx
+    /// The parent matters if the transition line connecting the vertices
+    /// goes outside of the lca region - we would be saying the parent is
+    /// the real lcx region in that case.
+    pub fn add_transition(
+        &mut self,
+        name: Name,
+        trigger: TriggerIdx,
+        source: VertexIdx,
+        target: VertexIdx,
+        guard: Guard,
+    ) -> StateMachineResult<DbId> {
+        let t_idx = self.transitions.len();
+        let parent = self.vertices[self.vertex(source)?].container;
+        let outgoing = &self.vertices[self.vertex(source)?].outgoing;
+        self.is_duplicate(name, outgoing)?;
+        self.valid_vertex(target)?;
+        let dbid = self.new_element(name, parent, t_idx, ElementType::Transition);
+        self.transitions
+            .push(Transition::new(name, dbid, trigger, source, target, guard));
+        Ok(dbid)
+    }
+
+    /// Add a state to the state machine.
+    /// If you try to add a state when there is more than one region
+    /// already defined for the state machine you will get an error.
+    /// In which case you need to add the state to the desired
+    /// region instead.
     pub fn add_state(&mut self, name: Name) -> StateMachineResult<DbId> {
         self.add_substate(name, self.state_machine.dbid)
     }
 
+    /// Add a state to an existing state or region.
+    /// If you try to add a state to a state with more than one region
+    /// you will get an error - you need to add the state to the desired
+    /// region instead.
     pub fn add_substate(&mut self, name: Name, parent: DbId) -> StateMachineResult<DbId> {
         let p_ele = self.element(parent)?;
         println!("{:#?}", self);
@@ -325,9 +431,7 @@ impl Db {
             _ => return Err(StateMachineError::CannotAddState(p_ele.dbid)),
         };
         let r_idx = self.get_region_by_dbid(r_dbid)?;
-        if self.is_duplicate(name, &self.regions[r_idx].subvertex) {
-            return Err(StateMachineError::StateAlreadyExists(name));
-        }
+        self.is_duplicate(name, &self.regions[r_idx].subvertex)?;
         let v_idx = self.vertices.len();
         let s_idx = self.states.len();
         let dbid = self.new_element(name, r_dbid, v_idx, ElementType::Vertex(VertexType::State));
@@ -339,6 +443,9 @@ impl Db {
         Ok(dbid)
     }
 
+    /// Add a region to the state machine. If there was no region already
+    /// added to the state machine and no vertices added, then it is
+    /// assumed this replaces the name of the first region of the state machine.
     pub fn add_sm_region(&mut self, name: Name) -> StateMachineResult<RegionDbId> {
         let dbid = self.elements.len();
         // if we only have the statemachine and default region
@@ -379,14 +486,18 @@ impl Db {
         if self.ancestor(s1, s2) {
             match self.elements[s2].element_type {
                 ElementType::Vertex(_) => Ok(self.parents[s2]),
+                ElementType::Transition => Ok(self.parents[s2]),
                 ElementType::StateMachine => Err(StateMachineError::NoCommonAncestor(s1, s2)),
+                ElementType::EventType => Err(StateMachineError::InvalidVertex(s2)),
                 ElementType::Region => Ok(s2),
             }
         } else if self.ancestor(s2, s1) {
             match self.elements[s1].element_type {
                 ElementType::Vertex(_) => Ok(self.parents[s1]),
                 ElementType::StateMachine => Err(StateMachineError::NoCommonAncestor(s1, s2)),
+                ElementType::EventType => Err(StateMachineError::InvalidVertex(s1)),
                 ElementType::Region => Ok(s1),
+                ElementType::Transition => Ok(self.parents[s1]),
             }
         } else {
             self.lca(self.parents[s1], self.parents[s2])
@@ -410,14 +521,18 @@ impl Db {
     }
     */
 
+    /// Return true if parent is an ancestor of child
     pub fn ancestor_of(&self, parent: DbId, child: DbId) -> bool {
         self.ancestor(child, parent)
     }
 
+    /// Return true if child is contained within parent
     pub fn has_ancestor(&self, child: DbId, parent: DbId) -> bool {
         self.ancestor(child, parent)
     }
 
+    /// Return true if child is contained within parent
+    /// This is an alias for has_ancestor
     pub fn ancestor(&self, child: DbId, parent: DbId) -> bool {
         // TODO: check if both are vertices
         if child == parent {
@@ -427,10 +542,12 @@ impl Db {
         }
     }
 
+    /// Return a list of dbids of regions in the state machine
     pub fn sm_regions(&self) -> Vec<RegionDbId> {
         self.state_machine.regions.clone()
     }
 
+    /// Return a list of dbids of regions of a state
     pub fn regions(&self, dbid: DbId) -> StateMachineResult<Vec<RegionDbId>> {
         let ele = self.element(dbid)?;
         match ele.element_type {
@@ -452,6 +569,7 @@ impl Db {
         }
     }
 
+    /// Print out one of a set of canned reports about the state machine
     pub fn report(&self, report: ReportType) {
         match report {
             ReportType::Full => {
@@ -463,6 +581,8 @@ impl Db {
         }
     }
 
+    /// Add a region to a State.
+    /// Provding name of region, and the dbid of the owning state.
     pub fn add_region(&mut self, name: Name, parent: DbId) -> StateMachineResult<DbId> {
         let dbid = self.elements.len();
         //let ele_type = self.get_element_type(parent).expect("Invalid parent");
@@ -558,8 +678,30 @@ impl Db {
         }
     }
 
-    fn get_vertex_by_dbid(&self, dbid: DbId) -> StateMachineResult<VertexIdx> {
-        println!("get_vertex_by_dbid: dbid:{:?}", dbid);
+    fn valid_transition(&self, dbid: DbId) -> StateMachineResult<()> {
+        self.transition(dbid)?;
+        Ok(())
+    }
+
+    fn transition(&self, dbid: DbId) -> StateMachineResult<TransitionIdx> {
+        let ele = self.element(dbid)?;
+        self.get_transition_by_ele(ele)
+    }
+
+    fn get_transition_by_ele(&self, ele: Element) -> StateMachineResult<VertexIdx> {
+        match ele.element_type {
+            ElementType::Transition => return Ok(ele.idx),
+            _ => return Err(StateMachineError::InvalidVertex(ele.dbid)),
+        }
+    }
+
+    fn valid_vertex(&self, dbid: DbId) -> StateMachineResult<()> {
+        self.vertex(dbid)?;
+        Ok(())
+    }
+
+    fn vertex(&self, dbid: DbId) -> StateMachineResult<VertexIdx> {
+        println!("vertex: dbid:{:?}", dbid);
         let ele = self.element(dbid)?;
         println!("got_vertex_by_dbid: ele:{:?}", ele);
         self.get_vertex_by_ele(ele)
@@ -572,6 +714,9 @@ impl Db {
         }
     }
 
+    /// Return true if state/vertex/region etc. is contained in
+    /// a different state/region.
+    /// A child and parent dbid are provided.
     pub fn is_contained_in(&self, child: DbId, parent: DbId) -> bool {
         // Return True if child is contained in parent
         // If child equals parent return false
@@ -653,8 +798,8 @@ struct VertexDef {
     idx: usize,  // index into arena db vec of corresponding element type
     vertex_type: VertexType,
     container: RegionIdx, // Deviation: a vertex must be in a region.
-    incoming: Vec<TransitionId>,
-    outgoing: Vec<TransitionId>,
+    incoming: Vec<TransitionIdx>,
+    outgoing: Vec<TransitionIdx>,
 }
 impl VertexDef {
     fn new(
@@ -685,10 +830,10 @@ trait Vertex: std::fmt::Debug {
     fn container(&self, db: &Db) -> StateMachineResult<RegionIdx> {
         Ok(db.vertices[self.def(db)?].container)
     }
-    fn incoming<'db>(&self, db: &'db Db) -> StateMachineResult<&'db Vec<TransitionId>> {
+    fn incoming<'db>(&self, db: &'db Db) -> StateMachineResult<&'db Vec<TransitionIdx>> {
         Ok(&db.vertices[self.def(db)?].incoming)
     }
-    fn outgoing<'db>(&self, db: &'db Db) -> StateMachineResult<&'db Vec<TransitionId>> {
+    fn outgoing<'db>(&self, db: &'db Db) -> StateMachineResult<&'db Vec<TransitionIdx>> {
         Ok(&db.vertices[self.def(db)?].outgoing)
     }
     /// Am I a child of the given State?
@@ -713,15 +858,120 @@ struct Event {
 #[derive(Debug, PartialEq)]
 struct EventType {
     name: Name,
+    dbid: DbId,
 }
+impl EventType {
+    pub fn new(name: Name, dbid: DbId) -> EventType {
+        EventType { name, dbid }
+    }
+}
+
 #[derive(Debug, PartialEq)]
 struct SubmachineState {
     name: Name,
 }
 
-#[derive(Debug, PartialEq)]
-struct Transition {
+pub trait GuardFnTr: Fn() -> bool {
+    fn name(&self) -> &str;
+}
+impl<F> GuardFnTr for F
+where
+    F: Fn() -> bool,
+{
+    fn name(&self) -> &str {
+        "foo"
+    }
+}
+
+// type Guard = Box<dyn Fn() -> bool>;
+type GuardFn = dyn GuardFnTr<Output = bool>;
+type Guard = Box<GuardFn>;
+impl fmt::Debug for GuardFn {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Guard<{}>", self.name())
+    }
+}
+//----------------------------------------------------------------
+// Debug helpers
+//----------------------------------------------------------------
+/// Extends a (possibly unsized) value with a Debug string.
+// (This type is unsized when T is unsized)
+pub struct Debuggable<T: ?Sized> {
+    text: &'static str,
+    value: T,
+}
+
+/// Produce a Debuggable<T> from an expression for T
+macro_rules! dbg {
+    ($($body:tt)+) => {
+        Debuggable {
+            text: stringify!($($body)+),
+            value: $($body)+,
+        }
+    };
+}
+
+impl<T: ?Sized> fmt::Debug for Debuggable<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.text)
+    }
+}
+
+// This makes Debuggable have most methods of the thing it wraps.
+// It also lets you call it when T is a function.
+impl<T: ?Sized> ::std::ops::Deref for Debuggable<T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        &self.value
+    }
+}
+
+//----------------------------------------------------------------
+// Note: this type is unsized
+pub type XGuardFn = Debuggable<dyn Fn() -> bool>;
+
+/*
+fn main() {
+    let d: &PolFn = &dbg!(|x| {
+        let _ = "random code so you can see how it's formatted";
+        assert_eq!(3 * (1 + 2), 9);
+        x
+    });
+    println!("{:?}", d);
+}
+*/
+
+#[derive(Debug)]
+pub struct Transition {
     name: Name,
+    dbid: usize, // index into arena db elements
+    trigger: TriggerIdx,
+    source: VertexIdx,
+    target: VertexIdx,
+    guard: Guard,
+}
+
+impl Transition {
+    pub fn new(
+        name: Name,
+        dbid: usize,
+        trigger: TriggerIdx,
+        source: VertexIdx,
+        target: VertexIdx,
+        guard: Guard,
+    ) -> Transition {
+        Transition {
+            name,
+            dbid,
+            trigger,
+            source,
+            target,
+            guard,
+        }
+    }
+    pub fn check(&self) -> bool {
+        (self.guard)()
+    }
 }
 
 enum Visibility {
@@ -830,6 +1080,14 @@ impl Region {
 }
 
 #[derive(Debug)]
+/// Note: per spec this is a subclass of State but that it not neccessary
+/// at the moment
+/// No entry/exit/do/outgoing/regions
+struct FinalState {
+    dbid: DbId,
+}
+
+#[derive(Debug)]
 struct State {
     dbid: DbId,
     state_type: StateType,
@@ -898,7 +1156,7 @@ impl State {
 
 impl Vertex for State {
     fn def<'db>(&self, db: &'db Db) -> StateMachineResult<VertexIdx> {
-        db.get_vertex_by_dbid(self.dbid)
+        db.vertex(self.dbid)
     }
 }
 

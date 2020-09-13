@@ -1,5 +1,6 @@
 extern crate rust_uml_sm;
 use rust_uml_sm::StateMachine;
+use rust_uml_sm::Transition;
 
 #[test]
 fn test_create_simple_states() {
@@ -57,10 +58,10 @@ fn test_create_region_with_states() {
     let s2 = sm.add_substate("s2", r1).unwrap();
     let s3 = sm.add_substate("s3", s2).unwrap();
     println!("here3");
-    assert_eq!(sm.region(s1).unwrap(), r1);
-    assert_eq!(sm.region(s2).unwrap(), r1);
+    assert_eq!(sm.owning_region(s1).unwrap(), r1);
+    assert_eq!(sm.owning_region(s2).unwrap(), r1);
     println!("{:#?}", sm);
-    assert_eq!(sm.region(s3).unwrap(), 4usize);
+    assert_eq!(sm.owning_region(s3).unwrap(), 4usize);
     // sm.add_region(c: Container, region_dbid: DbId)
 }
 
@@ -186,4 +187,45 @@ fn test_state_type() {
     assert_eq!(sm.is_orthogonal(s3).unwrap(), true);
     assert_eq!(sm.is_simple(s4).unwrap(), true);
     assert_eq!(sm.is_simple(s5).unwrap(), true);
+}
+
+fn print_hi() -> bool {
+    println!("hi");
+    false
+}
+
+#[test]
+fn test_state_behaviors() {
+    let mut sm = StateMachine::new("sm1");
+    let r1 = sm.add_sm_region("r1").unwrap();
+    let _ = sm.add_sm_region("r2").unwrap();
+    let s1 = sm.add_substate("s1", r1).unwrap();
+    let s2 = sm.add_substate("s2", r1).unwrap();
+    let s3 = sm.add_substate("s3", s2).unwrap();
+    let r3 = sm.add_region("r3", s3).unwrap();
+    let r4 = sm.add_region("r4", s3).unwrap();
+    let s4 = sm.add_substate("s4", r3).unwrap();
+    let s5 = sm.add_substate("s5", r4).unwrap();
+    // sm.on_entry(s1)
+}
+
+#[test]
+fn test_transitions() {
+    let mut sm = StateMachine::new("sm1");
+    let r1 = sm.add_sm_region("r1").unwrap();
+    let _ = sm.add_sm_region("r2").unwrap();
+    let s1 = sm.add_substate("s1", r1).unwrap();
+    let s2 = sm.add_substate("s2", r1).unwrap();
+    let s3 = sm.add_substate("s3", s2).unwrap();
+    let r3 = sm.add_region("r3", s3).unwrap();
+    let r4 = sm.add_region("r4", s3).unwrap();
+    let s4 = sm.add_substate("s4", r3).unwrap();
+    let s5 = sm.add_substate("s5", r4).unwrap();
+    let ev1 = sm.add_event_type("ev1").unwrap();
+    let t1 = sm
+        .add_transition("t1", ev1, s1, s2, Box::new(print_hi))
+        .unwrap();
+    assert_eq!(sm.check_transition(t1).unwrap(), false);
+
+    // sm.on_entry(s1)
 }

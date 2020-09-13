@@ -22,6 +22,19 @@ Active State Configuration: Recursively, the active states for all regions.
 In simple terms a StateMachine execution involves transitions from one state to another.
 Technically, because a statemachine can be more complex than a simple Finite State Machine, the execution involves the transitions from one "active state configuration" to another.
 
+Events are either generated internally or externally.
+The state machine operates an event loop processing each event in sequence.
+For each event we check all the active states to see if they have any transitions
+defined that trigger on the current event.
+That means that the event type is the same for the transition and any
+guard defined for the transition evaluates to true.
+We work from the innermost transition that is associated with the trigger, to
+the outter most state that has an potential transition. The innermost takes
+precedence. If there are multiple transitions that may trigger in sibling
+orthogonal regions, it is considered an error in the definition of the 
+state machine. The state machine should be defined in such a way that there
+are no ambiguous transitions potentially possible.
+
 """ uml.org
 A transition is in response to an Event occurrence.
 Each transition that match the Triggers of the StateMachine.

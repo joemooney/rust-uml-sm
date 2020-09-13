@@ -169,7 +169,7 @@ This book is generated using the handy mdbook crate, and published on github.io.
 -- View the book locally: <a href="file:///home/jpm/rust/rust-uml-sm/book/index.html">file:///home/jpm/rust/rust-uml-sm/book/index.html</a></li>
 </ul>
 <h1><a class="header" href="#introduction" id="introduction">Introduction</a></h1>
-<p><sub><span style='color:gray'><em>Last Updated: 2020-09-07 20:44:02</em></span></sub></p>
+<p><sub><span style='color:gray'><em>Last Updated: 2020-09-12 23:48:41</em></span></sub></p>
 <p>This book contains notes on how to use the rust-uml-sm module to create UML2 state machines.</p>
 <p>In order to create this book and play around with Rust, I have used the following tools:</p>
 <ul>
@@ -236,6 +236,18 @@ Active State: For a region or composite state, the particular substate to which 
 Active State Configuration: Recursively, the active states for all regions.</p>
 <p>In simple terms a StateMachine execution involves transitions from one state to another.
 Technically, because a statemachine can be more complex than a simple Finite State Machine, the execution involves the transitions from one &quot;active state configuration&quot; to another.</p>
+<p>Events are either generated internally or externally.
+The state machine operates an event loop processing each event in sequence.
+For each event we check all the active states to see if they have any transitions
+defined that trigger on the current event.
+That means that the event type is the same for the transition and any
+guard defined for the transition evaluates to true.
+We work from the innermost transition that is associated with the trigger, to
+the outter most state that has an potential transition. The innermost takes
+precedence. If there are multiple transitions that may trigger in sibling
+orthogonal regions, it is considered an error in the definition of the 
+state machine. The state machine should be defined in such a way that there
+are no ambiguous transitions potentially possible.</p>
 <p>&quot;&quot;&quot; uml.org
 A transition is in response to an Event occurrence.
 Each transition that match the Triggers of the StateMachine.
