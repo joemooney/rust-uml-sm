@@ -66,7 +66,7 @@ impl From<std::io::Error> for StateMachineError {
 type Name = &'static str;
 pub type StateMachineResult<T> = Result<T, StateMachineError>;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 enum VertexType {
     State,
     InitialState,
@@ -88,7 +88,7 @@ enum PseudostateKind {
     Choice,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 enum ElementType {
     Vertex(VertexType),
     Region,
@@ -117,9 +117,15 @@ impl Element {
 // we will type check during construction
 type RegionIdx = usize;
 type RegionDbId = usize;
+/// A DbId is an index into elements
 type DbId = usize;
+/// An Idx is an index into states|regions|vertices|triggers|...
+/// For example, elements[dbid] -> idx1 -> vertices[idx1].idx2 -> states[idx2]
+type Idx = usize;
 type StateIdx = usize;
 type VertexIdx = usize;
+type VertexDbId = usize;
+type TriggerDbId = usize;
 type TriggerIdx = usize;
 type TransitionIdx = usize;
 
@@ -309,20 +315,20 @@ impl Db {
 
     /// Return true if the given state does not have any regions
     pub fn is_simple(&self, dbid: DbId) -> StateMachineResult<bool> {
-        let s_idx = self.get_state_by_dbid(dbid)?;
+        let s_idx = self.state(dbid)?;
         println!("{:#?}", self.states[s_idx]);
         Ok(self.states[s_idx].is_simple())
     }
 
     /// Return true if the given state has exactly on region
     pub fn is_composite(&self, dbid: DbId) -> StateMachineResult<bool> {
-        let s_idx = self.get_state_by_dbid(dbid)?;
+        let s_idx = self.state(dbid)?;
         Ok(self.states[s_idx].is_composite())
     }
 
     /// Return true if the given state has one or more on region
     pub fn is_orthogonal(&self, dbid: DbId) -> StateMachineResult<bool> {
-        let s_idx = self.get_state_by_dbid(dbid)?;
+        let s_idx = self.state(dbid)?;
         Ok(self.states[s_idx].is_orthogonal())
     }
 
@@ -355,7 +361,7 @@ impl Db {
     }
 
     /// Add a transtion between two vertices to the state machine.
-    /// The parent is defaulted to the owning region of the source vertex.VertexIdx
+    /// The parent is defaulted to the owning region of the source vertex.
     /// The parent matters if the transition line connecting the vertices
     /// goes outside of the lca region - we would be saying the parent is
     /// the real lcx region in that case.
@@ -373,28 +379,134 @@ impl Db {
         Ok(self.transitions[self.transition(transition_dbid)?].check())
     }
 
+    pub fn perform_entry(&mut self, state_dbid: StateIdx) -> StateMachineResult<()> {
+        Ok(self.states[self.state(state_dbid)?].perform_entry())
+    }
+
+    pub fn perform_exit(&mut self, state_dbid: StateIdx) -> StateMachineResult<()> {
+        Ok(self.states[self.state(state_dbid)?].perform_exit())
+    }
+
+    pub fn perform_do(&mut self, state_dbid: StateIdx) -> StateMachineResult<()> {
+        Ok(self.states[self.state(state_dbid)?].perform_do())
+    }
+
     /// Add a transtion between two vertices to the state machine.
-    /// The parent is defaulted to the owning region of the source vertex.VertexIdx
+    /// The parent is defaulted to the owning region of the source vertex.
     /// The parent matters if the transition line connecting the vertices
     /// goes outside of the lca region - we would be saying the parent is
     /// the real lcx region in that case.
     pub fn add_transition(
         &mut self,
         name: Name,
-        trigger: TriggerIdx,
-        source: VertexIdx,
-        target: VertexIdx,
-        guard: Guard,
+        trigger: Option<TriggerDbId>,
+        source: VertexDbId,
+        target: VertexDbId,
+        effect: OptEffect,
+        guard: OptGuard,
     ) -> StateMachineResult<DbId> {
         let t_idx = self.transitions.len();
-        let parent = self.vertices[self.vertex(source)?].container;
-        let outgoing = &self.vertices[self.vertex(source)?].outgoing;
-        self.is_duplicate(name, outgoing)?;
-        self.valid_vertex(target)?;
+        // let parent = self.vertices[self.vertex(source)?].container;
+
+        // validation
+        let parent = self.vertex_def(source)?.container;
+        let source_idx = self.vertex(source)?;
+        let outgoing = &self.vertices[source_idx].outgoing;
+        self.is_duplicate(name, outgoing)?; // transitions have unique names
+        let target_idx = self.vertex(target)?;
+        let incoming = &self.vertices[target_idx].incoming;
+        self.is_duplicate(name, incoming)?; // transitions have unique names
+
+        // updates
         let dbid = self.new_element(name, parent, t_idx, ElementType::Transition);
-        self.transitions
-            .push(Transition::new(name, dbid, trigger, source, target, guard));
+        let outgoing = &mut self.vertices[source_idx].outgoing;
+        outgoing.push(dbid);
+        let incoming = &mut self.vertices[target_idx].incoming;
+        incoming.push(dbid);
+        let transition = Transition::new(name, dbid, trigger, source, target, effect, guard);
+        self.transitions.push(transition);
+
         Ok(dbid)
+    }
+
+    fn vertex_def(&self, dbid: DbId) -> StateMachineResult<&VertexDef> {
+        Ok(&self.vertices()[self.vertex(dbid)?])
+    }
+
+    fn vertices(&self) -> &Vec<VertexDef> {
+        &self.vertices
+    }
+
+    /// Return all transitions enabled for this vertex recursively.
+    fn _transitions_enabled(&self, dbid: DbId) -> StateMachineResult<Vec<TransitionIdx>> {
+        let ele = self.element(dbid)?;
+        let mut enabled: Vec<TransitionIdx> = Vec::new();
+        match ele.element_type {
+            ElementType::Vertex(_) => {
+                let v = &self.vertices[ele.idx];
+                if ele.element_type == ElementType::Vertex(VertexType::State) {
+                    let s = &self.states[v.idx];
+                    for r in &s.regions {
+                        enabled.extend(self._transitions_enabled(*r)?);
+                    }
+                }
+                for t in &v.outgoing {
+                    if self.transitions[*t].check() {
+                        enabled.push(*t);
+                    }
+                }
+            }
+            ElementType::Region => {
+                let r_idx = self.region(dbid)?;
+                let r = &self.regions[r_idx];
+                enabled.extend(self._transitions_enabled(r.active_state)?);
+            }
+            ElementType::StateMachine => {
+                for dbid in &self.state_machine.regions {
+                    enabled.extend(self._transitions_enabled(*dbid)?);
+                }
+            }
+            _ => return Err(StateMachineError::InvalidVertex(dbid)),
+        };
+        Ok(enabled)
+    }
+
+    /// Add a state to the state machine.
+    /// If you try to add a state when there is more than one region
+    /// already defined for the state machine you will get an error.
+    /// In which case you need to add the state to the desired
+    /// region instead.
+    pub fn set_initial(
+        &mut self,
+        region: DbId,
+        destination: DbId,
+        effect: OptEffect,
+    ) -> StateMachineResult<()> {
+        let dbid = self.new_vertex("initial", region, VertexType::InitialState)?;
+        self.add_transition("initial", None, dbid, destination, effect, OptGuard::None)?;
+        Ok(())
+    }
+
+    /// Add a state to the state machine.
+    /// If you try to add a state when there is more than one region
+    /// already defined for the state machine you will get an error.
+    /// In which case you need to add the state to the desired
+    /// region instead.
+    pub fn set_entry(&mut self, state: DbId, entry: Entry) -> StateMachineResult<()> {
+        let s_idx = self.state(state)?;
+        self.states[s_idx].entry = Some(entry);
+        Ok(())
+    }
+
+    /// Add a state to the state machine.
+    /// If you try to add a state when there is more than one region
+    /// already defined for the state machine you will get an error.
+    /// In which case you need to add the state to the desired
+    /// region instead.
+    pub fn set_exit(&mut self, state: DbId, exit: Exit) -> StateMachineResult<()> {
+        let s_idx = self.state(state)?;
+        self.states[s_idx].exit = Some(exit);
+        Ok(())
     }
 
     /// Add a state to the state machine.
@@ -430,14 +542,46 @@ impl Db {
                 .expect("internal_error:239923"),
             _ => return Err(StateMachineError::CannotAddState(p_ele.dbid)),
         };
-        let r_idx = self.get_region_by_dbid(r_dbid)?;
+        // if this is the first state added to the region
+        // then assume that there is an initial pseudostate
+        // that is connected to it.
+        let dbid = self.new_vertex(name, r_dbid, VertexType::State)?;
+        Ok(dbid)
+    }
+
+    /// Create a new vertex. Initially the index to what the vertex represents
+    /// is left unset (zero).
+    /// name: name of the vertex, must be unique in the region
+    /// region: dbid of the region containing the new vertex
+    fn new_vertex(
+        &mut self,
+        name: Name,
+        region: DbId,
+        vertex_type: VertexType,
+    ) -> StateMachineResult<VertexDbId> {
+        let r_idx = self.region(region)?;
         self.is_duplicate(name, &self.regions[r_idx].subvertex)?;
         let v_idx = self.vertices.len();
-        let s_idx = self.states.len();
-        let dbid = self.new_element(name, r_dbid, v_idx, ElementType::Vertex(VertexType::State));
-        self.states.push(State::new(dbid));
+        let dbid = self.new_element(name, region, v_idx, ElementType::Vertex(vertex_type));
+        let idx = match vertex_type {
+            VertexType::State => {
+                let s_idx = self.states.len();
+                self.states.push(State::new(dbid));
+                s_idx
+            }
+            VertexType::InitialState => {
+                self.regions[r_idx].initial_state = dbid;
+                self.regions[r_idx].active_state = dbid;
+                0 // we do not have a Vec of InitialState or PseudoStates
+            }
+            _ => 0,
+        };
         self.vertices
-            .push(VertexDef::new(name, dbid, s_idx, r_dbid, VertexType::State));
+            .push(VertexDef::new(name, dbid, idx, region, vertex_type));
+        if self.regions[r_idx].subvertex.len() == 0 {
+            self.regions[r_idx].initial_state = dbid;
+            self.regions[r_idx].active_state = dbid;
+        }
         self.regions[r_idx].subvertex.push(dbid);
         println!("Vertices:{:#?}", self.vertices);
         Ok(dbid)
@@ -630,7 +774,7 @@ impl Db {
     fn add_region_to_container(&mut self, c: Container, region_dbid: DbId) {
         match c {
             Container::State(s_dbid) => {
-                let s_idx = self.get_state_by_dbid(s_dbid).expect("Invalid state");
+                let s_idx = self.state(s_dbid).expect("Invalid state");
                 self.states[s_idx].add_region(region_dbid)
             }
             Container::StateMachine(_) => self.state_machine.add_region(region_dbid),
@@ -645,7 +789,7 @@ impl Db {
         }
     }
 
-    fn get_region_by_dbid(&self, dbid: DbId) -> StateMachineResult<RegionIdx> {
+    fn region(&self, dbid: DbId) -> StateMachineResult<RegionIdx> {
         println!("get_region_by_dbid: {:?}", dbid);
         let ele = self.element(dbid)?;
         println!("got_region_by_dbid: {:?}", ele);
@@ -660,21 +804,6 @@ impl Db {
                 return Ok(r_idx);
             }
             _ => return Err(StateMachineError::InvalidRegion(ele.dbid)),
-        }
-    }
-
-    fn get_state_by_dbid(&self, dbid: DbId) -> StateMachineResult<StateIdx> {
-        let ele = self.element(dbid)?;
-        self.get_state_by_ele(ele)
-    }
-
-    fn get_state_by_ele(&self, ele: Element) -> StateMachineResult<StateIdx> {
-        match ele.element_type {
-            ElementType::Vertex(VertexType::State) => {
-                let s_idx = self.vertices[ele.idx].idx;
-                return Ok(s_idx);
-            }
-            _ => return Err(StateMachineError::InvalidState(ele.dbid)),
         }
     }
 
@@ -695,11 +824,35 @@ impl Db {
         }
     }
 
+    /// Verify that a dbid references a State
+    fn valid_state(&self, dbid: DbId) -> StateMachineResult<()> {
+        self.state(dbid)?;
+        Ok(())
+    }
+
+    /// Return the state index corresponding to a dbid
+    fn state(&self, dbid: DbId) -> StateMachineResult<StateIdx> {
+        let ele = self.element(dbid)?;
+        self.get_state_by_ele(ele)
+    }
+
+    /// Return the state index corresponding to an element
+    fn get_state_by_ele(&self, ele: Element) -> StateMachineResult<StateIdx> {
+        match ele.element_type {
+            ElementType::Vertex(VertexType::State) => {
+                let s_idx = self.vertices[ele.idx].idx;
+                return Ok(s_idx);
+            }
+            _ => return Err(StateMachineError::InvalidState(ele.dbid)),
+        }
+    }
+
     fn valid_vertex(&self, dbid: DbId) -> StateMachineResult<()> {
         self.vertex(dbid)?;
         Ok(())
     }
 
+    /// Convert dbid to vertex index
     fn vertex(&self, dbid: DbId) -> StateMachineResult<VertexIdx> {
         println!("vertex: dbid:{:?}", dbid);
         let ele = self.element(dbid)?;
@@ -871,6 +1024,125 @@ struct SubmachineState {
     name: Name,
 }
 
+pub type Entry = Behavior;
+pub type Exit = Behavior;
+pub type Effect = Behavior;
+pub type OptEffect = OptBehavior;
+
+//----------------------------------------------------------------
+/// Behaviors are actions taken as a result of a transition.
+/// Exit         - upon entry to a State
+/// Entry        - upon exit from a State
+/// Transition   - up performing a transition
+/// DoActivity   - while in a state (aborted before Exit)
+pub trait BehaviorFnTr: Fn() {
+    fn name(&self) -> &str;
+}
+impl<F> BehaviorFnTr for F
+where
+    F: Fn(),
+{
+    fn name(&self) -> &str {
+        "foo"
+    }
+}
+impl Clone for Behavior {
+    fn clone(&self) -> Self {
+        Behavior {
+            func: self.func,
+            name: self.name.clone(),
+        }
+    }
+}
+
+#[derive(Copy)]
+pub struct Guard {
+    func: GuardFunc,
+    name: &'static str,
+}
+
+impl Clone for Guard {
+    fn clone(&self) -> Self {
+        Guard {
+            func: self.func,
+            name: self.name.clone(),
+        }
+    }
+}
+
+type GuardFunc = fn() -> bool;
+
+impl Guard {
+    pub fn new(func: GuardFunc) -> Guard {
+        Guard { func, name: "ggg" }
+    }
+    pub fn some(func: GuardFunc) -> OptGuard {
+        OptGuard::Guard(Guard::new(func))
+    }
+}
+impl fmt::Debug for Guard {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Guard<{}>", self.name)
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum OptGuard {
+    Guard(Guard),
+    None,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum OptBehavior {
+    Behavior(Behavior),
+    None,
+}
+
+#[derive(Copy)]
+pub struct Behavior {
+    func: BehaviorFunc,
+    name: &'static str,
+}
+
+type BehaviorFunc = fn() -> ();
+
+impl Behavior {
+    pub fn new(func: BehaviorFunc) -> Behavior {
+        Behavior { func, name: "xxx" }
+    }
+    pub fn some(func: BehaviorFunc) -> OptBehavior {
+        OptBehavior::Behavior(Behavior::new(func))
+    }
+}
+impl fmt::Debug for Behavior {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Behavior<{}>", self.name)
+    }
+}
+
+/*
+impl Copy for Behavior {}
+impl Clone for Behavior {
+    fn clone(&self) -> Self {
+        Behavior {
+            func: self.func,
+            name: self.name.clone(),
+        }
+    }
+}
+*/
+
+type BehaviorFn = dyn BehaviorFnTr;
+//type Behavior = Box<BehaviorFn>;
+impl fmt::Debug for BehaviorFn {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Behavior<{}>", self.name())
+    }
+}
+
+//----------------------------------------------------------------
+/// Guard is used to determine is a transition can take
+/// place. It is a function that returns true or false.
 pub trait GuardFnTr: Fn() -> bool {
     fn name(&self) -> &str;
 }
@@ -885,7 +1157,7 @@ where
 
 // type Guard = Box<dyn Fn() -> bool>;
 type GuardFn = dyn GuardFnTr<Output = bool>;
-type Guard = Box<GuardFn>;
+pub type OLDGuard = Box<GuardFn>;
 impl fmt::Debug for GuardFn {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Guard<{}>", self.name())
@@ -945,20 +1217,22 @@ fn main() {
 pub struct Transition {
     name: Name,
     dbid: usize, // index into arena db elements
-    trigger: TriggerIdx,
-    source: VertexIdx,
-    target: VertexIdx,
-    guard: Guard,
+    trigger: Option<TriggerDbId>,
+    source: VertexDbId,
+    target: VertexDbId,
+    effect: OptEffect,
+    guard: OptGuard,
 }
 
 impl Transition {
     pub fn new(
         name: Name,
         dbid: usize,
-        trigger: TriggerIdx,
-        source: VertexIdx,
-        target: VertexIdx,
-        guard: Guard,
+        trigger: Option<TriggerDbId>,
+        source: VertexDbId,
+        target: VertexDbId,
+        effect: OptEffect,
+        guard: OptGuard,
     ) -> Transition {
         Transition {
             name,
@@ -966,11 +1240,15 @@ impl Transition {
             trigger,
             source,
             target,
+            effect,
             guard,
         }
     }
     pub fn check(&self) -> bool {
-        (self.guard)()
+        match &self.guard {
+            OptGuard::None => true,
+            OptGuard::Guard(guard) => (guard.func)(),
+        }
     }
 }
 
@@ -1059,10 +1337,14 @@ enum Container {
 }
 
 #[derive(Debug)]
+/// during a transition the active_state of a region may be a vertex
+/// but it must always end up as a State (or FinalState)
 struct Region {
     name: Name,
     dbid: usize,
     container: Container,
+    initial_state: DbId,
+    active_state: DbId,
     subvertex: Vec<DbId>,
     transition: Vec<DbId>,
 }
@@ -1073,6 +1355,8 @@ impl Region {
             name,
             dbid,
             container,
+            initial_state: 0,
+            active_state: 0,
             subvertex: Vec::new(),
             transition: Vec::new(),
         }
@@ -1093,6 +1377,9 @@ struct State {
     state_type: StateType,
     regions: Vec<RegionIdx>,
     region: Option<RegionIdx>,
+    entry: Option<Entry>,
+    exit: Option<Exit>,
+    do_while: Option<Behavior>,
 }
 
 impl State {
@@ -1102,6 +1389,9 @@ impl State {
             state_type: StateType::Simple,
             regions: Vec::new(),
             region: None,
+            entry: None,
+            exit: None,
+            do_while: None,
         }
     }
     fn is_simple(&self) -> bool {
@@ -1127,6 +1417,27 @@ impl State {
             n if n == 1 => Ok(Some(self.regions[0])),
             n if n == 0 => Ok(None),
             _ => Err(StateMachineError::ContainsMultipleRegions(self.dbid)),
+        }
+    }
+
+    pub fn perform_entry(&self) {
+        match &self.entry {
+            Some(behavior) => (behavior.func)(),
+            None => (),
+        }
+    }
+
+    pub fn perform_exit(&self) {
+        match &self.exit {
+            Some(behavior) => (behavior.func)(),
+            None => (),
+        }
+    }
+
+    pub fn perform_do(&self) {
+        match &self.do_while {
+            Some(behavior) => (behavior.func)(),
+            None => (),
         }
     }
 

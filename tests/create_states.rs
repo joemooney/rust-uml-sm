@@ -1,4 +1,8 @@
 extern crate rust_uml_sm;
+use rust_uml_sm::Effect;
+use rust_uml_sm::Entry;
+use rust_uml_sm::Exit;
+use rust_uml_sm::Guard;
 use rust_uml_sm::StateMachine;
 use rust_uml_sm::Transition;
 
@@ -189,9 +193,22 @@ fn test_state_type() {
     assert_eq!(sm.is_simple(s5).unwrap(), true);
 }
 
-fn print_hi() -> bool {
-    println!("hi");
+fn false_guard() -> bool {
+    println!("returning false...");
     false
+}
+
+fn true_guard() -> bool {
+    println!("returning true...");
+    true
+}
+
+fn print_enter() {
+    println!("enter");
+}
+
+fn print_transition() {
+    println!("transition");
 }
 
 #[test]
@@ -209,6 +226,37 @@ fn test_state_behaviors() {
     // sm.on_entry(s1)
 }
 
+// To see diagram Alt-D (Install plantuml extention, graphviz, java)
+/*
+@startuml
+
+state sm1 {
+    ' single quote is a comment
+    's1: first line   'This would be a long description
+    's1: second line  'of the state s1 if you uncomment
+    's2: description
+
+    [*] --> s1
+    s1 --> s2
+    state s2 {
+        [*] --> s3
+        s3 -> s4
+        s4 --> [*]
+        ---
+        [*] -> s6
+        s6 -> s7
+        s7 -> [*]
+    }
+
+    s2 --> [*]
+    --
+    [*] --> s5
+    s5 -> [*]
+}
+
+@enduml
+*/
+
 #[test]
 fn test_transitions() {
     let mut sm = StateMachine::new("sm1");
@@ -221,11 +269,29 @@ fn test_transitions() {
     let r4 = sm.add_region("r4", s3).unwrap();
     let s4 = sm.add_substate("s4", r3).unwrap();
     let s5 = sm.add_substate("s5", r4).unwrap();
-    let ev1 = sm.add_event_type("ev1").unwrap();
+    sm.set_entry(s1, Entry::new(print_enter)).unwrap();
+    sm.set_exit(
+        s1,
+        Exit::new(|| {
+            println!("bye from s1");
+        }),
+    )
+    .unwrap();
+    let ev1 = Some(sm.add_event_type("ev1").unwrap());
+    let guard_false = Guard::some(false_guard);
+    let guard_true = Guard::some(true_guard);
+    let trans_effect = Effect::some(print_transition);
+
     let t1 = sm
-        .add_transition("t1", ev1, s1, s2, Box::new(print_hi))
+        .add_transition("t1", ev1, s1, s2, trans_effect, guard_false)
+        .unwrap();
+    let t2 = sm
+        .add_transition("t2", ev1, s1, s2, trans_effect, guard_true)
         .unwrap();
     assert_eq!(sm.check_transition(t1).unwrap(), false);
+    assert_eq!(sm.check_transition(t2).unwrap(), true);
+
+    sm.set_initial(r1, s1, trans_effect).unwrap();
 
     // sm.on_entry(s1)
 }
