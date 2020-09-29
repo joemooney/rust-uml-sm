@@ -16,6 +16,7 @@ pub enum StateMachineError {
     InvalidState(DbId),
     InvalidVertex(DbId),
     InvalidRegion(DbId),
+    NoInitialState(DbId),
     InvalidDbId(DbId),
     NoCommonAncestor(DbId, DbId),
     StateAlreadyExists(Name),
@@ -67,7 +68,7 @@ type Name = &'static str;
 pub type StateMachineResult<T> = Result<T, StateMachineError>;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum VertexType {
+pub enum VertexType {
     State,
     InitialState,
     FinalState,
@@ -123,6 +124,7 @@ type DbId = usize;
 /// For example, elements[dbid] -> idx1 -> vertices[idx1].idx2 -> states[idx2]
 type Idx = usize;
 type StateIdx = usize;
+type StateDbId = usize;
 type VertexIdx = usize;
 type VertexDbId = usize;
 type TriggerDbId = usize;
@@ -130,6 +132,10 @@ type TriggerIdx = usize;
 type TransitionIdx = usize;
 
 #[derive(Debug)]
+/// elements:
+/// parents:  Since this is the same size as elements,
+///           we use the element dbid as an index to
+///           look up its parent. No need for a HashMap.
 pub struct Db {
     name: Name,
     elements: Vec<Element>,
@@ -221,6 +227,14 @@ impl Db {
         Ok(self._fullname(dbid))
     }
 
+    /// Returns a full name, panics if the index is not valid
+    /// invariant: state machine definition is complete
+    fn _name(&self, dbid: DbId) -> Name {
+        self.names[dbid]
+    }
+
+    /// Returns a full name, panics if the index is not valid
+    /// invariant: state machine definition is complete
     fn _fullname(&self, dbid: DbId) -> &String {
         &self.fullnames[dbid]
     }
@@ -437,6 +451,161 @@ impl Db {
         &self.vertices
     }
 
+    pub fn print_active_states(&self) -> StateMachineResult<Vec<VertexDbId>> {
+        let active_states = self._active_states(0)?;
+        for dbid in &active_states {
+            println!("[active_state] {}", self._fullname(*dbid))
+        }
+        Ok(active_states)
+    }
+
+    //pub fn regions(&mut self, dbid: DbId) -> StateMachineResult<Vec<VertexDbId>> {
+    //}
+
+    /// Return all incoming transitions whose target is directly
+    /// within the given region, or the incoming transitions into
+    /// the given vertex.
+    pub fn transitions(&self, dbid: DbId) -> StateMachineResult<Vec<VertexDbId>> {
+        let ele = self.element(dbid)?;
+        match ele.element_type {
+            ElementType::Region => Ok(self
+                .transitions
+                .iter()
+                .filter(|t| self.parents[t.target] == dbid)
+                .map(|t| t.dbid)
+                .collect::<Vec<_>>()),
+            ElementType::Vertex(VertexType::State) => Ok(self.vertices[ele.idx].incoming.clone()),
+            ElementType::StateMachine => {
+                Ok(self.transitions.iter().map(|t| t.dbid).collect::<Vec<_>>())
+            }
+            _ => Err(StateMachineError::InvalidVertex(dbid)),
+        }
+    }
+
+    /// Return all transitions enabled for this vertex recursively.
+    fn _active_states(&self, dbid: DbId) -> StateMachineResult<Vec<VertexDbId>> {
+        println!(">active_state] {}", self._fullname(dbid));
+        let ele = self.element(dbid)?;
+        let mut active_states: Vec<TransitionIdx> = Vec::new();
+        match ele.element_type {
+            ElementType::Vertex(_) => {
+                let v = &self.vertices[ele.idx];
+                if ele.element_type == ElementType::Vertex(VertexType::State) {
+                    let s = &self.states[v.idx];
+                    if s.is_simple() {
+                        println!("<active_state] {}", self._fullname(dbid));
+                        active_states.push(dbid);
+                    } else {
+                        println!("|active_state] {}", self._fullname(dbid));
+                        for r in &s.regions {
+                            active_states.extend(self._active_states(*r)?);
+                        }
+                    }
+                } else {
+                    // Normally, this would not be possible, for pseudostates
+                    println!("+active_state] {}", self._fullname(dbid));
+                    active_states.push(dbid);
+                }
+            }
+            ElementType::Region => {
+                let r_idx = self.region(dbid)?;
+                let r = &self.regions[r_idx];
+                let active_state = r.active_state;
+                if active_state != 0 {
+                    println!("^active_state]: Region {} ", self._fullname(dbid));
+                    active_states.extend(self._active_states(r.active_state)?);
+                } else {
+                    println!("error: Region {} has 0 active state", self._fullname(dbid));
+                }
+            }
+            ElementType::StateMachine => {
+                for dbid in &self.state_machine.regions {
+                    active_states.extend(self._active_states(*dbid)?);
+                }
+            }
+            _ => return Err(StateMachineError::InvalidVertex(dbid)),
+        };
+        Ok(active_states)
+    }
+
+    /// Return all transitions enabled for this vertex recursively.
+    ///
+    pub fn _plantuml(&self, dbid: DbId, indent: &String) -> StateMachineResult<String> {
+        let ele = self.element(dbid)?;
+        let new_indent = format!("{}    ", indent);
+        match ele.element_type {
+            ElementType::Region => {
+                let r = self
+                    .transitions(dbid)?
+                    .iter()
+                    .map(|t| {
+                        let tx = &self.transitions[self.elements[*t].idx];
+                        let mut src = self._name(tx.source);
+                        src = if src == "initial" { "[*]" } else { src };
+                        let tgt = self._name(tx.target);
+                        format!("{}{} --> {}", indent, src, tgt)
+                    })
+                    .collect::<Vec<String>>()
+                    .join("\n");
+
+                // composite state transitions.
+                let c = self
+                    ._composite_states(dbid) // list of state dbids in region
+                    .iter()
+                    .map(|s_dbid| {
+                        let cs = self
+                            ._plantuml(*s_dbid, &new_indent)
+                            .unwrap_or_else(|_| format!("Invalid_dbid:{}", s_dbid));
+                        format!(
+                            "{}state {} {{\n{}\n{}}}\n",
+                            indent,
+                            self._name(*s_dbid),
+                            cs,
+                            indent
+                        )
+                    })
+                    .collect::<Vec<String>>()
+                    .join("\n");
+                if c == "" {
+                    Ok(r)
+                } else if r == "" {
+                    Ok(c)
+                } else {
+                    Ok(r + "\n" + &c)
+                }
+            }
+            ElementType::Vertex(VertexType::State) => Ok(self.states[self.elements[dbid].idx]
+                .regions
+                .iter()
+                .map(|r| {
+                    self._plantuml(*r, &new_indent)
+                        .unwrap_or_else(|_| format!("Invalid_dbid:{}", r))
+                })
+                .collect::<Vec<String>>()
+                .join(&format!("{}-s-\n", indent))),
+            ElementType::StateMachine => {
+                let s = self
+                    .state_machine
+                    .regions
+                    .iter()
+                    .map(|r| {
+                        self._plantuml(*r, &new_indent)
+                            .unwrap_or_else(|_| format!("Invalid_dbid:{}", r))
+                    })
+                    .collect::<Vec<String>>()
+                    .join(&format!("    {}---\n", indent));
+                let o = format!(
+                    "{}startuml\nstate {} {{\n{}}}\n@enduml\n",
+                    '@', // prevent plantuml plugin from triggering
+                    self._name(dbid),
+                    s
+                );
+                Ok(o)
+            }
+            _ => Err(StateMachineError::InvalidVertex(dbid)),
+        }
+    }
+
     /// Return all transitions enabled for this vertex recursively.
     fn _transitions_enabled(&self, dbid: DbId) -> StateMachineResult<Vec<TransitionIdx>> {
         let ele = self.element(dbid)?;
@@ -471,20 +640,35 @@ impl Db {
         Ok(enabled)
     }
 
-    /// Add a state to the state machine.
-    /// If you try to add a state when there is more than one region
-    /// already defined for the state machine you will get an error.
-    /// In which case you need to add the state to the desired
-    /// region instead.
-    pub fn set_initial(
+    /// Add a transition from the InitialState to another
+    /// vertex in the region. If there is no InitialState defined,
+    /// then define one.
+    pub fn initial_transition(
         &mut self,
         region: DbId,
         destination: DbId,
         effect: OptEffect,
     ) -> StateMachineResult<()> {
-        let dbid = self.new_vertex("initial", region, VertexType::InitialState)?;
+        let dbid = match self.initial_state(region) {
+            Ok(Some(dbid)) => dbid,
+            _ => self.add_vertex("initial", region, VertexType::InitialState)?,
+        };
         self.add_transition("initial", None, dbid, destination, effect, OptGuard::None)?;
         Ok(())
+    }
+
+    fn initial_state(&self, region: DbId) -> StateMachineResult<Option<StateDbId>> {
+        self._region(region)?.initial_state(self)
+        /*
+        let r_idx = self.region(region)?;
+        for v in &self.regions[r_idx].subvertex {
+            match self.elements[*v].element_type {
+                ElementType::Vertex(VertexType::InitialState) => return Ok(Some(*v)),
+                _ => (),
+            }
+        }
+        Err(StateMachineError::NoInitialState(region))
+        */
     }
 
     /// Add a state to the state machine.
@@ -518,7 +702,14 @@ impl Db {
         self.add_substate(name, self.state_machine.dbid)
     }
 
-    /// Add a state to an existing state or region.
+    /// Add a substate to an existing state or region.
+    /// If you provide a state dbid then:
+    ///   If the state does not have any regions, one will be created.
+    ///   If the state has one region, that is one used.
+    ///   If the state has multiple regions, that is an error.
+    ///
+    /// This is the same as add_vertex to identified region.
+    ///
     /// If you try to add a state to a state with more than one region
     /// you will get an error - you need to add the state to the desired
     /// region instead.
@@ -542,10 +733,22 @@ impl Db {
                 .expect("internal_error:239923"),
             _ => return Err(StateMachineError::CannotAddState(p_ele.dbid)),
         };
+
         // if this is the first state added to the region
-        // then assume that there is an initial pseudostate
-        // that is connected to it.
-        let dbid = self.new_vertex(name, r_dbid, VertexType::State)?;
+        // we cannot assume that there is an initial pseudostate
+        // that is connected to it since initial_transition may be called
+        // later to connect to a different state and we want to
+        // protect against multiple calls to initial_transition
+
+        // We reserve the name "initial" for the initial state
+        // If you want to create a non-InitialState called "initial"
+        // then use add_vertex(...) instead
+        let vertex_type = if name == "initial" {
+            VertexType::InitialState
+        } else {
+            VertexType::State
+        };
+        let dbid = self.add_vertex(name, r_dbid, vertex_type)?;
         Ok(dbid)
     }
 
@@ -553,7 +756,7 @@ impl Db {
     /// is left unset (zero).
     /// name: name of the vertex, must be unique in the region
     /// region: dbid of the region containing the new vertex
-    fn new_vertex(
+    pub fn add_vertex(
         &mut self,
         name: Name,
         region: DbId,
@@ -701,6 +904,73 @@ impl Db {
         }
     }
 
+    /// Return a list of dbids of othogonal states in a region
+    /// panic if not called against a region
+    pub fn _composite_states(&self, dbid: DbId) -> Vec<StateDbId> {
+        self._states(dbid)
+            .iter()
+            .copied()
+            .filter(|&dbid| self._is_composite(dbid))
+            .collect()
+    }
+
+    /// Return a list of dbids of othogonal states in a region
+    /// panic if not called against a region
+    pub fn _orthonal_states(&self, dbid: DbId) -> Vec<StateDbId> {
+        self._states(dbid)
+            .iter()
+            .copied()
+            .filter(|&dbid| self._is_orthogonal(dbid))
+            .collect()
+    }
+
+    /// Return a list of dbids of states in a region
+    /// panic if not called against a region
+    pub fn _states(&self, dbid: DbId) -> Vec<StateDbId> {
+        let r_idx = self.elements[dbid].idx;
+        self.regions[r_idx]
+            .subvertex
+            .iter()
+            .copied()
+            .filter(|&dbid| self._is_state(dbid))
+            .collect()
+    }
+
+    /// Return a list of dbids of regions of a state
+    pub fn states(&self, dbid: DbId) -> StateMachineResult<Vec<StateDbId>> {
+        let ele = self.element(dbid)?;
+        match ele.element_type {
+            ElementType::Region => {
+                let r_idx = self.region(dbid)?;
+                Ok(self.regions[r_idx]
+                    .subvertex
+                    .iter()
+                    .copied()
+                    .filter(|dbid| self._is_state(*dbid))
+                    .collect::<Vec<StateDbId>>())
+            }
+            _ => Err(StateMachineError::InvalidRegion(dbid)),
+        }
+    }
+
+    #[inline]
+    /// panic if not called against a vertex
+    fn _is_state(&self, dbid: DbId) -> bool {
+        self.elements[dbid].element_type == ElementType::Vertex(VertexType::State)
+    }
+
+    #[inline]
+    /// panic if not called against a state
+    fn _is_composite(&self, dbid: DbId) -> bool {
+        self.states[self.vertices[self.elements[dbid].idx].idx].is_composite()
+    }
+
+    #[inline]
+    /// panic if not called against a state
+    fn _is_orthogonal(&self, dbid: DbId) -> bool {
+        self.states[self.vertices[self.elements[dbid].idx].idx].is_orthogonal()
+    }
+
     /// In the case where the state machine or state return the
     /// region dbid for the one region it contains or an error
     /// if there are is than one region defined.
@@ -789,6 +1059,13 @@ impl Db {
         }
     }
 
+    fn _region(&self, dbid: DbId) -> StateMachineResult<&Region> {
+        println!("get_region_by_dbid: {:?}", dbid);
+        let ele = self.element(dbid)?;
+        println!("got_region_by_dbid: {:?}", ele);
+        Ok(&self.regions[self.get_region_by_ele(ele)?])
+    }
+
     fn region(&self, dbid: DbId) -> StateMachineResult<RegionIdx> {
         println!("get_region_by_dbid: {:?}", dbid);
         let ele = self.element(dbid)?;
@@ -834,6 +1111,11 @@ impl Db {
     fn state(&self, dbid: DbId) -> StateMachineResult<StateIdx> {
         let ele = self.element(dbid)?;
         self.get_state_by_ele(ele)
+    }
+
+    /// Return the state index corresponding to a dbid or panic!
+    fn _state(&self, dbid: DbId) -> &State {
+        &self.states[self.vertices[self.elements[dbid].idx].idx]
     }
 
     /// Return the state index corresponding to an element
@@ -1361,6 +1643,15 @@ impl Region {
             transition: Vec::new(),
         }
     }
+    fn initial_state(&self, sm: &StateMachine) -> StateMachineResult<Option<StateDbId>> {
+        for v in &self.subvertex {
+            match sm.elements[*v].element_type {
+                ElementType::Vertex(VertexType::InitialState) => return Ok(Some(*v)),
+                _ => (),
+            }
+        }
+        Err(StateMachineError::NoInitialState(self.dbid))
+    }
 }
 
 #[derive(Debug)]
@@ -1394,15 +1685,22 @@ impl State {
             do_while: None,
         }
     }
+
+    #[inline]
     fn is_simple(&self) -> bool {
         self.regions.len() == 0
     }
+
+    #[inline]
     fn is_composite(&self) -> bool {
         self.regions.len() > 0
     }
+
+    #[inline]
     fn is_orthogonal(&self) -> bool {
         self.regions.len() > 1
     }
+
     // fn is_submachine_state(&self) -> bool {
     // }
 

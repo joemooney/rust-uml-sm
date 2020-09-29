@@ -5,6 +5,9 @@ A UML2 StateMachine implemenation in Rust programming language.
 ## Goals
 
 - full support for UML 2.x specification
+- Learn Rust
+- Support plantuml import/export
+- Run via WebAssembly?
 
 ## Building the associated Book 
 

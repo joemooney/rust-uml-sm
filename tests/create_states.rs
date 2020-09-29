@@ -194,21 +194,21 @@ fn test_state_type() {
 }
 
 fn false_guard() -> bool {
-    println!("returning false...");
+    println!("xxx returning false...");
     false
 }
 
 fn true_guard() -> bool {
-    println!("returning true...");
+    println!("xxx returning true...");
     true
 }
 
 fn print_enter() {
-    println!("enter");
+    println!("xxx enter");
 }
 
 fn print_transition() {
-    println!("transition");
+    println!("xxx transition");
 }
 
 #[test]
@@ -261,7 +261,9 @@ state sm1 {
 fn test_transitions() {
     let mut sm = StateMachine::new("sm1");
     let r1 = sm.add_sm_region("r1").unwrap();
-    let _ = sm.add_sm_region("r2").unwrap();
+    let r2 = sm.add_sm_region("r2").unwrap();
+    let s91 = sm.add_substate("s91", r2).unwrap();
+    let s92 = sm.add_substate("s92", s91).unwrap();
     let s1 = sm.add_substate("s1", r1).unwrap();
     let s2 = sm.add_substate("s2", r1).unwrap();
     let s3 = sm.add_substate("s3", s2).unwrap();
@@ -291,7 +293,11 @@ fn test_transitions() {
     assert_eq!(sm.check_transition(t1).unwrap(), false);
     assert_eq!(sm.check_transition(t2).unwrap(), true);
 
-    sm.set_initial(r1, s1, trans_effect).unwrap();
+    sm.initial_transition(r1, s1, trans_effect).unwrap();
+    sm.initial_transition(r2, s91, trans_effect).unwrap();
+    sm.print_active_states();
+    let p = sm._plantuml(0, &String::from("")).unwrap();
+    println!("{}", p);
 
     // sm.on_entry(s1)
 }
