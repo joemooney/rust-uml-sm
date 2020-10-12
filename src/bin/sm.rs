@@ -1,6 +1,6 @@
-use std::collections::HashMap;
-use std::fmt;
-use std::process;
+// use std::collections::HashMap;
+// use std::fmt;
+// use std::process;
 // use std::io::{self, Write};
 //use std::string::ToString;
 
@@ -36,15 +36,50 @@ Similarly, a submachine Statemachine can be exited as a result of:reaching it
 */
 
 extern crate rust_uml_sm;
+use rust_uml_sm::StateMachineDef;
 use rust_uml_sm::StateMachine;
 
+#[derive(PartialEq, Clone, Debug)]
+enum Emotion {
+    Happy,
+    Sad,
+    Angry,
+}
+
+#[derive(StateMachine)]
+struct Foo {
+    emotion: Emotion,
+}
+impl Foo {
+    fn new() -> Foo {
+        Foo {
+            emotion: Emotion::Happy,
+        }
+    }
+    pub fn is_happy(&self) -> bool {
+        if self.emotion == Emotion::Happy {
+            println!("Yes! I'm happy");
+            true
+        } else {
+            println!("No! I'm not happy");
+            false
+        }
+
+    }
+}
+
+
 fn main() {
-    let mut sm = StateMachine::new("sm1");
+    let mut sm = StateMachineDef::new("sm1");
     println!("Created {:#?}", sm);
     let s1 = sm.add_state("s1").expect("Failed to add state");
     println!("Added S1 {:#?}", sm);
-    let s2 = sm.add_substate("s2", s1).expect("Failed to add state");
+    let _s2 = sm.add_substate("s2", s1).expect("Failed to add state");
     println!("Added S2 {:#?}", sm);
+
+    let foo = Foo::new_statemachine();
+    foo.state.is_happy();
+
     /*
     let mut s = StateMachine::new("sm1");
     static S1: &State = &State::new("s1");

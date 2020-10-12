@@ -1,5 +1,6 @@
 // use std::collections::HashMap;
 use std::fmt;
+pub use rust_uml_sm_derive::StateMachine;
 // use std::process;
 // use std::io::{self, Write};
 // use std::string::ToString;
@@ -140,7 +141,7 @@ pub struct Db {
     name: Name,
     elements: Vec<Element>,
     pub dbid: DbId,
-    state_machine: StateMachineDef,
+    state_machine: StateMachineRoot,
     states: Vec<State>,
     transitions: Vec<Transition>,
     event_types: Vec<EventType>,
@@ -152,7 +153,11 @@ pub struct Db {
     regions: Vec<Region>,
 }
 
-pub type StateMachine = Db;
+pub type StateMachineDef = Db;
+
+trait NewStateMachine {
+    fn new_statemachine();
+}
 
 pub enum ReportType {
     Full,
@@ -160,7 +165,7 @@ pub enum ReportType {
 }
 
 impl Db {
-    /// Create a new StateMachine.
+    /// Create a new StateMachineDef.
     /// The constructed statemachine will have a single region
     /// automatically added and named "region_1". If you then
     /// call add_sm_region("region_name") before adding any
@@ -179,7 +184,7 @@ impl Db {
             vertices: Vec::new(),
             names: Vec::new(),
             fullnames: Vec::new(),
-            state_machine: StateMachineDef::new(name, 0),
+            state_machine: StateMachineRoot::new(name, 0),
             regions: Vec::new(),
         };
         let dbid = db.new_element(name, 0, 0, ElementType::StateMachine);
@@ -307,15 +312,15 @@ impl Db {
 
     fn state_to_string_body(&self, v: &VertexDef) -> String {
         let s = &self.states[v.idx];
+        // state_type: {:#?},
         format!(
             r#"xState {{
 {}
-    state_type: {:#?},
     regions: {:#?},
     region: {:#?},
 }}"#,
             self.vertex_to_string_body(v),
-            s.state_type,
+            //s.state_type,
             s.regions,
             s.region
         )
@@ -1456,6 +1461,7 @@ pub struct Debuggable<T: ?Sized> {
 }
 
 /// Produce a Debuggable<T> from an expression for T
+#[allow(unused_macros)]
 macro_rules! dbg {
     ($($body:tt)+) => {
         Debuggable {
@@ -1547,6 +1553,7 @@ trait NamedElement {
     fn visiblity(&self) -> Visibility;
 }
 
+/*
 #[derive(Debug, PartialEq)]
 enum StateType {
     Simple,
@@ -1554,10 +1561,11 @@ enum StateType {
     Orthogonal,
     Submachine,
 }
+*/
 
 // This is a type of event which a state machine may expect
 #[derive(Debug)]
-struct StateMachineDef {
+struct StateMachineRoot {
     name: Name,
     dbid: DbId,
     regions: Vec<DbId>,
@@ -1565,9 +1573,9 @@ struct StateMachineDef {
     submachine_states: Vec<DbId>,
 }
 
-impl StateMachineDef {
-    fn new(name: Name, dbid: DbId) -> StateMachineDef {
-        StateMachineDef {
+impl StateMachineRoot {
+    fn new(name: Name, dbid: DbId) -> StateMachineRoot {
+        StateMachineRoot {
             name,
             dbid,
             submachine_states: Vec::new(),
@@ -1643,7 +1651,7 @@ impl Region {
             transition: Vec::new(),
         }
     }
-    fn initial_state(&self, sm: &StateMachine) -> StateMachineResult<Option<StateDbId>> {
+    fn initial_state(&self, sm: &StateMachineDef) -> StateMachineResult<Option<StateDbId>> {
         for v in &self.subvertex {
             match sm.elements[*v].element_type {
                 ElementType::Vertex(VertexType::InitialState) => return Ok(Some(*v)),
@@ -1665,7 +1673,7 @@ struct FinalState {
 #[derive(Debug)]
 struct State {
     dbid: DbId,
-    state_type: StateType,
+    // state_type: StateType,
     regions: Vec<RegionIdx>,
     region: Option<RegionIdx>,
     entry: Option<Entry>,
@@ -1677,7 +1685,7 @@ impl State {
     fn new(dbid: usize) -> State {
         State {
             dbid,
-            state_type: StateType::Simple,
+            // state_type: StateType::Simple,
             regions: Vec::new(),
             region: None,
             entry: None,
@@ -1769,7 +1777,7 @@ impl Vertex for State {
     }
 }
 
-impl fmt::Display for StateMachineDef {
+impl fmt::Display for StateMachineRoot {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,

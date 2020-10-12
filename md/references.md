@@ -7,6 +7,10 @@
 - [Rust By Example](https://doc.rust-lang.org/rust-by-example)
 - [Rust Powerpoint](https://nikolaivazquez.com/rust-workshop/#1)
 
+## Blogs etc
+  https://exphp.github.io/
+  https://stevedonovan.github.io/rustifications/
+
 ## Excercises
 
 - [Project Euler](https://projecteuler.net/)

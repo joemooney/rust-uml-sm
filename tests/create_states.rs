@@ -4,11 +4,13 @@ use rust_uml_sm::Entry;
 use rust_uml_sm::Exit;
 use rust_uml_sm::Guard;
 use rust_uml_sm::StateMachine;
-use rust_uml_sm::Transition;
+use rust_uml_sm::StateMachineDef;
+
+// use rust_uml_sm::Transition;
 
 #[test]
 fn test_create_simple_states() {
-    let mut sm = StateMachine::new("sm1");
+    let mut sm = StateMachineDef::new("sm1");
     let s1 = sm.add_state("s1").unwrap();
     assert_eq!(s1, 2);
     let s2 = sm.add_state("s2").unwrap();
@@ -17,7 +19,7 @@ fn test_create_simple_states() {
 
 #[test]
 fn test_create_nested_state() {
-    let mut sm = StateMachine::new("sm1");
+    let mut sm = StateMachineDef::new("sm1");
     let s1 = sm.add_state("s1").unwrap();
     assert_eq!(s1, 2);
     let s2 = sm.add_substate("s2", s1).unwrap();
@@ -41,7 +43,7 @@ fn test_create_nested_state() {
 
 #[test]
 fn test_create_sm_regions() {
-    let mut sm = StateMachine::new("sm1");
+    let mut sm = StateMachineDef::new("sm1");
     let regions = vec![1];
     assert_eq!(sm.sm_regions(), regions);
     assert_eq!(sm.name(1).unwrap(), "region_1");
@@ -54,7 +56,7 @@ fn test_create_sm_regions() {
 
 #[test]
 fn test_create_region_with_states() {
-    let mut sm = StateMachine::new("sm1");
+    let mut sm = StateMachineDef::new("sm1");
     let r1 = sm.add_sm_region("r1").unwrap();
     println!("here1 {}", r1);
     let s1 = sm.add_substate("s1", r1).unwrap();
@@ -71,7 +73,7 @@ fn test_create_region_with_states() {
 
 #[test]
 fn test_names() {
-    let mut sm = StateMachine::new("sm1");
+    let mut sm = StateMachineDef::new("sm1");
     let r1 = sm.add_sm_region("r1").unwrap();
     let s1 = sm.add_substate("s1", r1).unwrap();
     let s2 = sm.add_substate("s2", r1).unwrap();
@@ -85,7 +87,7 @@ fn test_names() {
 
 #[test]
 fn test_fullnames() {
-    let mut sm = StateMachine::new("sm1");
+    let mut sm = StateMachineDef::new("sm1");
     let r1 = sm.add_sm_region("r1").unwrap();
     let s1 = sm.add_substate("s1", r1).unwrap();
     let s2 = sm.add_substate("s2", r1).unwrap();
@@ -99,7 +101,7 @@ fn test_fullnames() {
 
 #[test]
 fn test_query_regions() {
-    let mut sm = StateMachine::new("sm1");
+    let mut sm = StateMachineDef::new("sm1");
     let r1 = sm.add_sm_region("r1").unwrap();
     let r2 = sm.add_sm_region("r2").unwrap();
     let s1 = sm.add_substate("s1", r1).unwrap();
@@ -115,7 +117,7 @@ fn test_query_regions() {
 
 #[test]
 fn test_ancestor() {
-    let mut sm = StateMachine::new("sm1");
+    let mut sm = StateMachineDef::new("sm1");
     let r1 = sm.add_sm_region("r1").unwrap();
     let r2 = sm.add_sm_region("r2").unwrap();
     let s1 = sm.add_substate("s1", r1).unwrap();
@@ -137,7 +139,7 @@ fn test_ancestor() {
 
 #[test]
 fn test_lca() {
-    let mut sm = StateMachine::new("sm1");
+    let mut sm = StateMachineDef::new("sm1");
     let r1 = sm.add_sm_region("r1").unwrap();
     let _ = sm.add_sm_region("r2").unwrap();
     let s1 = sm.add_substate("s1", r1).unwrap();
@@ -153,7 +155,7 @@ fn test_lca() {
 
 #[test]
 fn test_lca_state() {
-    let mut sm = StateMachine::new("sm1");
+    let mut sm = StateMachineDef::new("sm1");
     let r1 = sm.add_sm_region("r1").unwrap();
     let _ = sm.add_sm_region("r2").unwrap();
     let s1 = sm.add_substate("s1", r1).unwrap();
@@ -169,7 +171,7 @@ fn test_lca_state() {
 
 #[test]
 fn test_state_type() {
-    let mut sm = StateMachine::new("sm1");
+    let mut sm = StateMachineDef::new("sm1");
     let r1 = sm.add_sm_region("r1").unwrap();
     let _ = sm.add_sm_region("r2").unwrap();
     let s1 = sm.add_substate("s1", r1).unwrap();
@@ -213,16 +215,16 @@ fn print_transition() {
 
 #[test]
 fn test_state_behaviors() {
-    let mut sm = StateMachine::new("sm1");
+    let mut sm = StateMachineDef::new("sm1");
     let r1 = sm.add_sm_region("r1").unwrap();
     let _ = sm.add_sm_region("r2").unwrap();
-    let s1 = sm.add_substate("s1", r1).unwrap();
+    let _s1 = sm.add_substate("s1", r1).unwrap();
     let s2 = sm.add_substate("s2", r1).unwrap();
     let s3 = sm.add_substate("s3", s2).unwrap();
     let r3 = sm.add_region("r3", s3).unwrap();
     let r4 = sm.add_region("r4", s3).unwrap();
-    let s4 = sm.add_substate("s4", r3).unwrap();
-    let s5 = sm.add_substate("s5", r4).unwrap();
+    let _s4 = sm.add_substate("s4", r3).unwrap();
+    let _s5 = sm.add_substate("s5", r4).unwrap();
     // sm.on_entry(s1)
 }
 
@@ -257,20 +259,38 @@ state sm1 {
 @enduml
 */
 
+/*
+
+enum Emotion {
+    Happy,
+    Sad,
+    Angry,
+}
+
+#[derive(StateMachine)]
+struct Foo {
+    emotion: Emotion,
+}
+
+let foo_sm: Foo_StateMachine = Foo::new_statemachine();
+foo_sm.define.add_region(name: )
+
+*/
+
 #[test]
 fn test_transitions() {
-    let mut sm = StateMachine::new("sm1");
+    let mut sm = StateMachineDef::new("sm1");
     let r1 = sm.add_sm_region("r1").unwrap();
     let r2 = sm.add_sm_region("r2").unwrap();
     let s91 = sm.add_substate("s91", r2).unwrap();
-    let s92 = sm.add_substate("s92", s91).unwrap();
+    let _s92 = sm.add_substate("s92", s91).unwrap();
     let s1 = sm.add_substate("s1", r1).unwrap();
     let s2 = sm.add_substate("s2", r1).unwrap();
     let s3 = sm.add_substate("s3", s2).unwrap();
     let r3 = sm.add_region("r3", s3).unwrap();
     let r4 = sm.add_region("r4", s3).unwrap();
-    let s4 = sm.add_substate("s4", r3).unwrap();
-    let s5 = sm.add_substate("s5", r4).unwrap();
+    let _s4 = sm.add_substate("s4", r3).unwrap();
+    let _s5 = sm.add_substate("s5", r4).unwrap();
     sm.set_entry(s1, Entry::new(print_enter)).unwrap();
     sm.set_exit(
         s1,
@@ -295,9 +315,54 @@ fn test_transitions() {
 
     sm.initial_transition(r1, s1, trans_effect).unwrap();
     sm.initial_transition(r2, s91, trans_effect).unwrap();
-    sm.print_active_states();
+    let _ = sm.print_active_states();
     let p = sm._plantuml(0, &String::from("")).unwrap();
     println!("{}", p);
 
     // sm.on_entry(s1)
+}
+
+#[derive(PartialEq, Debug, Clone)]
+enum Emotion {
+    Happy,
+    Sad,
+    Angry,
+}
+#[derive(StateMachine)]
+struct Foo {
+    emotion: Emotion,
+}
+impl Foo {
+    fn new() -> Foo {
+        Foo {
+            emotion: Emotion::Happy,
+        }
+    }
+}
+
+#[test]
+fn test_macro() {
+    let foo = Foo::new_statemachine();
+    assert_eq!(foo.state.emotion, Emotion::Happy);
+    /*
+    let s1 = foo.define.state("s1", None);
+    let s1_a = foo.define.state("a", s1);
+    let s1_b = foo.define.state("b", s1);
+    let s1_c = foo.define.state("c", s1);
+    let s1_c = foo.start();
+    let s1_c = foo.send("event1");
+    let s1_c = foo.stop();
+
+    let ev1 = sm.add_event_type("ev1");
+    let guard_false = Guard::some(false_guard);
+    let guard_true = Guard::some(true_guard);
+    let trans_effect = Effect::some(print_transition);
+
+    let t1 = sm
+        .add_transition("t1", ev1, s1, s2, trans_effect, guard_false)
+        .unwrap();
+    let t2 = sm
+        .add_transition("t2", ev1, s1, s2, trans_effect, guard_true)
+        .unwrap();
+    */
 }
